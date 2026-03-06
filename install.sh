@@ -235,23 +235,19 @@ install_cli() {
   info "Installed CLI → $dest"
   echo ""
 
-  # Suggest PATH addition if not already there
-  if ! path_contains "$global_dir"; then
-    shell_name=$(detect_shell)
-    profile_path=$(get_shell_profile "$shell_name")
-    export_line="export PATH=\"\$HOME/.intent_first/bin:\$PATH\""
-    
-    echo "  ${BOLD}Add to PATH:${RESET}"
-    echo "    ${GREEN}${profile_path}${RESET}"
-    echo ""
-    echo "  ${CYAN}Copy & paste:${RESET}"
-    echo "    echo '$export_line' >> $profile_path"
-    echo "    source $profile_path"
-    echo ""
-  fi
-
+  shell_name=$(detect_shell)
+  profile_path=$(get_shell_profile "$shell_name")
+  export_line="export PATH=\"\$HOME/.intent_first/bin:\$PATH\""
+  
+  echo "  ${BOLD}Add to PATH:${RESET}"
+  echo "    ${GREEN}${profile_path}${RESET}"
+  echo ""
+  echo "  ${CYAN}Copy & paste:${RESET}"
+  echo "    echo '$export_line' >> $profile_path"
+  echo "    source $profile_path"
+  echo ""
   echo "  ${BOLD}Quick start:${RESET}"
-  echo "    $dest new"
+  echo "    intent-first new"
 }
 
 # ── Ensure .gitignore covers workflow data ─────────────────────
