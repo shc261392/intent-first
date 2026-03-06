@@ -1,20 +1,18 @@
 description: "Evaluate prompt quality across all workflow stages"
 
+# Each test loads its target file via file:// in vars.content.
+# The echo provider returns {{content}} verbatim, and assertions check it.
 prompts:
-  - file://prompts/wf-spec.prompt.md
-  - file://prompts/wf-plan.prompt.md
-  - file://prompts/wf-execution.prompt.md
-  - file://prompts/wf-artifacts.prompt.md
-  - file://prompts/wf-yolo.prompt.md
+  - "{{content}}"
 
 providers:
   - echo
 
 tests:
-  # ── Structure tests: each prompt must contain key sections ──
+  # ── Spec ──────────────────────────────────────────────────────────────────
   - description: "Spec prompt has required sections"
     vars:
-      prompt_file: wf-spec.prompt.md
+      content: file://prompts/wf-spec.prompt.md
     assert:
       - type: contains
         value: "Read Intent"
@@ -25,9 +23,26 @@ tests:
       - type: contains
         value: "Never proceed without human approval"
 
+  - description: "Spec prompt references correct files"
+    vars:
+      content: file://prompts/wf-spec.prompt.md
+    assert:
+      - type: contains
+        value: "s1_intent.md"
+      - type: contains
+        value: "s2_spec.md"
+
+  - description: "Spec prompt enforces stage locking"
+    vars:
+      content: file://prompts/wf-spec.prompt.md
+    assert:
+      - type: contains
+        value: "intent-first lock"
+
+  # ── Plan ──────────────────────────────────────────────────────────────────
   - description: "Plan prompt has required sections"
     vars:
-      prompt_file: wf-plan.prompt.md
+      content: file://prompts/wf-plan.prompt.md
     assert:
       - type: contains
         value: "Review Specification"
@@ -38,9 +53,26 @@ tests:
       - type: contains
         value: "Never proceed without approved spec"
 
+  - description: "Plan prompt references correct files"
+    vars:
+      content: file://prompts/wf-plan.prompt.md
+    assert:
+      - type: contains
+        value: "s2_spec.md"
+      - type: contains
+        value: "s3_plan.md"
+
+  - description: "Plan prompt enforces stage locking"
+    vars:
+      content: file://prompts/wf-plan.prompt.md
+    assert:
+      - type: contains
+        value: "intent-first lock"
+
+  # ── Execution ─────────────────────────────────────────────────────────────
   - description: "Execution prompt has required sections"
     vars:
-      prompt_file: wf-execution.prompt.md
+      content: file://prompts/wf-execution.prompt.md
     assert:
       - type: contains
         value: "Initialize"
@@ -48,10 +80,20 @@ tests:
         value: "Handle Issues"
       - type: contains
         value: "Follow plan exactly"
+      - type: contains
+        value: "human approval"
 
+  - description: "Execution prompt enforces stage locking"
+    vars:
+      content: file://prompts/wf-execution.prompt.md
+    assert:
+      - type: contains
+        value: "intent-first lock"
+
+  # ── Artifacts ─────────────────────────────────────────────────────────────
   - description: "Artifacts prompt has required sections"
     vars:
-      prompt_file: wf-artifacts.prompt.md
+      content: file://prompts/wf-artifacts.prompt.md
     assert:
       - type: contains
         value: "Verify Completion"
@@ -62,40 +104,17 @@ tests:
       - type: contains
         value: "Lessons Learned"
 
-  # ── Safety guardrails: human-in-the-loop enforcement ──
-  - description: "All prompts enforce human approval"
-    assert:
-      - type: contains
-        value: "human approval"
-
-  - description: "All prompts reference stage locking"
-    assert:
-      - type: contains
-        value: "Locked"
-
-  # ── File naming consistency ──
-  - description: "Spec prompt references s1_/s2_ filenames"
+  - description: "Artifacts prompt enforces stage locking"
     vars:
-      prompt_file: wf-spec.prompt.md
+      content: file://prompts/wf-artifacts.prompt.md
     assert:
       - type: contains
-        value: "s1_intent.md"
-      - type: contains
-        value: "s2_spec.md"
+        value: "intent-first lock"
 
-  - description: "Plan prompt references s2_/s3_ filenames"
-    vars:
-      prompt_file: wf-plan.prompt.md
-    assert:
-      - type: contains
-        value: "s2_spec.md"
-      - type: contains
-        value: "s3_plan.md"
-
-  # ── YOLO mode tests ──
+  # ── YOLO ──────────────────────────────────────────────────────────────────
   - description: "YOLO prompt has required sections"
     vars:
-      prompt_file: wf-yolo.prompt.md
+      content: file://prompts/wf-yolo.prompt.md
     assert:
       - type: contains
         value: "YOLO Mode"
@@ -108,9 +127,17 @@ tests:
 
   - description: "YOLO prompt enforces pause on low confidence"
     vars:
-      prompt_file: wf-yolo.prompt.md
+      content: file://prompts/wf-yolo.prompt.md
     assert:
       - type: contains
         value: "Pause and present to human"
       - type: contains
         value: "Never lower your confidence threshold"
+
+  - description: "YOLO prompt enforces stage locking"
+    vars:
+      content: file://prompts/wf-yolo.prompt.md
+    assert:
+      - type: contains
+        value: "intent-first lock"
+
