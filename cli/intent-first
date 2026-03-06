@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# intent-first — Minimal CLI for Intent-First Workflow
+# https://github.com/shc261392/intent-first
+set -euo pipefail
+
+WORKFLOW_DIR="workflow"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Templates live next to this script's parent or in the installed location
+TEMPLATE_DIR="${INTENT_FIRST_TEMPLATE_DIR:-$(dirname "$SCRIPT_DIR")/templates}"
+
+usage() {
+  cat <<'EOF'
+intent-first — Agentic workflow CLI
+
+Usage:
+  intent-first new              Create a new workflow (auto-numbered)
+  intent-first validate [NUM]   Validate workflow files (all or specific)
+  intent-first list             List all workflows and their status
+  intent-first help             Show this help
+
+Environment:
+  INTENT_FIRST_TEMPLATE_DIR     Override template directory path
+  WORKFLOW_DIR                  Override workflow directory (default: workflow)
+EOF
+}
+
+next_number() {
+  if [ ! -d "$WORKFLOW_DIR" ]; then
+    echo "001"
+    return
+  fi
+  local max=0
+  for dir in "$WORKFLOW_DIR"/[0-9][0-9][0-9]; do
+    [ -d "$dir" ] || continue
+    num=$(basename "$dir" | sed 's/^0*//')
+    [ -z "$num" ] && num=0
+    [ "$num" -gt "$max" ] && max=$num
+  done
+  printf "%03d" $((max + 1))
+}
+
+cmd_new() {
+  local num
+  num=$(next_number)
+  local target="$WORKFLOW_DIR/$num"
+
+  mkdir -p "$target"
+
+  for tmpl in intent.md spec.md plan.md execution.md artifacts.md; do
+    if [ -f "$TEMPLATE_DIR/$tmpl" ]; then
+      cp "$TEMPLATE_DIR/$tmpl" "$target/$tmpl"
+    else
+      echo "⚠️  Template not found: $TEMPLATE_DIR/$tmpl (skipped)"
+    fi
+  done
+
+  echo "✅ Created workflow $num → $target/"
+  echo ""
+  echo "Next steps:"
+  echo "  1. Edit $target/intent.md with your goals"
+  echo "  2. Ask your AI agent: /wf-spec $num"
+  echo "  3. Review and approve, then: /wf-plan $num"
+  echo "  4. Review and approve, then: /wf-execution $num"
+  echo "  5. When done: /wf-artifacts $num"
+}
+
+cmd_validate() {
+  local target_num="$1"
+  local errors=0
+  local checked=0
+
+  validate_one() {
+    local dir="$1"
+    local num
+    num=$(basename "$dir")
+    local issues=0
+
+    for f in intent.md spec.md plan.md execution.md artifacts.md; do
+      if [ ! -f "$dir/$f" ]; then
+        echo "  ❌ Missing: $dir/$f"
+        issues=$((issues + 1))
+      fi
+    done
+
+    # Check intent.md has title
+    if [ -f "$dir/intent.md" ]; then
+      if ! grep -q "^# Intent:" "$dir/intent.md"; then
+        echo "  ⚠️  $dir/intent.md: Missing '# Intent:' title"
+        issues=$((issues + 1))
+      fi
+    fi
+
+    # Check spec.md has required fields
+    if [ -f "$dir/spec.md" ]; then
+      for field in "Status:" "Decision Maker:" "Human Approval:"; do
+        if ! grep -q "$field" "$dir/spec.md"; then
+          echo "  ⚠️  $dir/spec.md: Missing '$field' field"
+          issues=$((issues + 1))
+        fi
+      done
+    fi
+
+    # Check plan.md has required fields
+    if [ -f "$dir/plan.md" ]; then
+      for field in "Status:" "Derived From:"; do
+        if ! grep -q "$field" "$dir/plan.md"; then
+          echo "  ⚠️  $dir/plan.md: Missing '$field' field"
+          issues=$((issues + 1))
+        fi
+      done
+    fi
+
+    if [ "$issues" -eq 0 ]; then
+      echo "  ✅ Workflow $num: All files present and valid"
+    fi
+
+    return $issues
+  }
+
+  if [ -n "$target_num" ]; then
+    local dir="$WORKFLOW_DIR/$target_num"
+    if [ ! -d "$dir" ]; then
+      echo "❌ Workflow $target_num not found at $dir"
+      exit 1
+    fi
+    echo "Validating workflow $target_num..."
+    validate_one "$dir" || errors=$((errors + $?))
+    checked=1
+  else
+    if [ ! -d "$WORKFLOW_DIR" ]; then
+      echo "No workflow directory found."
+      exit 0
+    fi
+    for dir in "$WORKFLOW_DIR"/[0-9][0-9][0-9]; do
+      [ -d "$dir" ] || continue
+      echo "Validating $(basename "$dir")..."
+      validate_one "$dir" || errors=$((errors + $?))
+      checked=$((checked + 1))
+    done
+  fi
+
+  echo ""
+  if [ "$checked" -eq 0 ]; then
+    echo "No workflows found."
+  elif [ "$errors" -eq 0 ]; then
+    echo "✅ All $checked workflow(s) valid."
+  else
+    echo "⚠️  Found $errors issue(s) across $checked workflow(s)."
+    exit 1
+  fi
+}
+
+cmd_list() {
+  if [ ! -d "$WORKFLOW_DIR" ]; then
+    echo "No workflows yet. Run: intent-first new"
+    exit 0
+  fi
+
+  printf "%-6s %-20s %-15s\n" "NUM" "TITLE" "STATUS"
+  printf "%-6s %-20s %-15s\n" "---" "---" "---"
+
+  for dir in "$WORKFLOW_DIR"/[0-9][0-9][0-9]; do
+    [ -d "$dir" ] || continue
+    local num
+    num=$(basename "$dir")
+    local title="(untitled)"
+    local status="intent"
+
+    # Extract title from intent.md
+    if [ -f "$dir/intent.md" ]; then
+      local t
+      t=$(grep "^# Intent:" "$dir/intent.md" | sed 's/^# Intent: *//' | head -1)
+      [ -n "$t" ] && title="$t"
+    fi
+
+    # Determine furthest stage (check for non-template content)
+    if [ -f "$dir/artifacts.md" ] && grep -q "^\*\*Status:\*\* Complete$" "$dir/artifacts.md" 2>/dev/null; then
+      status="✅ complete"
+    elif [ -f "$dir/execution.md" ] && grep -q "^\*\*Status:\*\* In Progress$" "$dir/execution.md" 2>/dev/null; then
+      status="⚙️  executing"
+    elif [ -f "$dir/plan.md" ] && grep -q "Approved.*Locked" "$dir/plan.md" 2>/dev/null; then
+      status="📋 planned"
+    elif [ -f "$dir/spec.md" ] && grep -q "Approved.*Locked" "$dir/spec.md" 2>/dev/null; then
+      status="📐 specified"
+    else
+      status="💡 intent"
+    fi
+
+    printf "%-6s %-20s %-15s\n" "$num" "${title:0:20}" "$status"
+  done
+}
+
+# Main
+case "${1:-help}" in
+  new)        cmd_new ;;
+  validate)   cmd_validate "${2:-}" ;;
+  list)       cmd_list ;;
+  help|--help|-h) usage ;;
+  *)          echo "Unknown command: $1"; usage; exit 1 ;;
+esac
