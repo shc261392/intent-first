@@ -2,6 +2,8 @@
 
 # Intent-First
 
+![intent-first](https://github.com/user-attachments/assets/1dc5ab56-b597-4cb2-a349-b6c4c19cfa03)
+
 **A lightweight local protocol that stops AI agents from guessing.**
 
 Markdown files + a tiny CLI. Zero dependencies. Works with any AI coding tool.
