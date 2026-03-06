@@ -4,8 +4,7 @@
 set -euo pipefail
 
 WORKFLOW_DIR="workflow"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE_DIR="${INTENT_FIRST_TEMPLATE_DIR:-$(dirname "$SCRIPT_DIR")/templates}"
+TEMPLATE_DIR="${INTENT_FIRST_TEMPLATE_DIR:-.intent-first/templates}"
 
 # Colors (if terminal supports it)
 if [ -t 1 ]; then

@@ -66,6 +66,31 @@ download_text() {
   esac
 }
 
+# ── Detect current shell ───────────────────────────────────────
+detect_shell() {
+  local shell_name
+  shell_name=$(basename "$SHELL")
+  echo "$shell_name"
+}
+
+# ── Get shell profile path ─────────────────────────────────────
+get_shell_profile() {
+  local shell="$1"
+  case "$shell" in
+    zsh)   echo "$HOME/.zshrc" ;;
+    bash)  echo "$HOME/.bashrc" ;;
+    fish)  echo "$HOME/.config/fish/config.fish" ;;
+    ksh)   echo "$HOME/.kshrc" ;;
+    *)     echo "$HOME/.profile" ;; # fallback
+  esac
+}
+
+# ── Check if PATH already contains directory ───────────────────
+path_contains() {
+  local dir="$1"
+  echo "$PATH" | tr ':' '\n' | grep -qx "$dir"
+}
+
 # ── Detect AI tools in use ─────────────────────────────────────
 detect_tools() {
   local tools=()
@@ -202,6 +227,8 @@ install_templates() {
 install_cli() {
   local global_dir="$HOME/.intent_first/bin"
   local dest="$global_dir/intent-first"
+  local shell_name profile_path export_line
+  
   mkdir -p "$global_dir"
   download "$RAW/cli/intent-first" "$dest"
   chmod +x "$dest"
@@ -209,13 +236,21 @@ install_cli() {
   echo ""
 
   # Suggest PATH addition if not already there
-  if ! echo "$PATH" | tr ':' '\n' | grep -qx "$global_dir"; then
-    echo "  Add to your shell profile (~/.zshrc, ~/.bashrc, etc.):"
-    echo "    export PATH=\"\$HOME/.intent_first/bin:\$PATH\""
+  if ! path_contains "$global_dir"; then
+    shell_name=$(detect_shell)
+    profile_path=$(get_shell_profile "$shell_name")
+    export_line="export PATH=\"\$HOME/.intent_first/bin:\$PATH\""
+    
+    echo "  ${BOLD}Add to PATH:${RESET}"
+    echo "    ${GREEN}${profile_path}${RESET}"
+    echo ""
+    echo "  ${CYAN}Copy & paste:${RESET}"
+    echo "    echo '$export_line' >> $profile_path"
+    echo "    source $profile_path"
     echo ""
   fi
 
-  echo "  Or use directly:"
+  echo "  ${BOLD}Quick start:${RESET}"
   echo "    $dest new"
 }
 

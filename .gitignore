@@ -10,3 +10,7 @@ Thumbs.db
 
 # Test artifacts
 workflow/
+
+# Intent-First workflow (ephemeral)
+.intent-first/
+workflow/
