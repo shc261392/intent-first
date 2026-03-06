@@ -5,18 +5,33 @@ set -euo pipefail
 
 WORKFLOW_DIR="workflow"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Templates live next to this script's parent or in the installed location
 TEMPLATE_DIR="${INTENT_FIRST_TEMPLATE_DIR:-$(dirname "$SCRIPT_DIR")/templates}"
+
+# Colors (if terminal supports it)
+if [ -t 1 ]; then
+  BOLD='\033[1m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  RESET='\033[0m'
+else
+  BOLD='' GREEN='' YELLOW='' RESET=''
+fi
 
 usage() {
   cat <<'EOF'
 intent-first — Agentic workflow CLI
 
 Usage:
-  intent-first new              Create a new workflow (auto-numbered)
-  intent-first validate [NUM]   Validate workflow files (all or specific)
-  intent-first list             List all workflows and their status
-  intent-first help             Show this help
+  intent-first new [name]           Create a workflow (auto-numbered or named)
+  intent-first lock <ID> <STAGE>    Lock a stage (read-only via chmod)
+  intent-first unlock <ID> <STAGE>  Unlock a stage (writable)
+  intent-first validate [ID]        Validate workflow(s)
+  intent-first list                 List all workflows with status
+  intent-first implode              Remove all intent-first installed files
+  intent-first help                 Show this help
+
+ID: workflow directory name — number or slug (e.g. "1", "add-auth")
+Stages: intent | spec | plan | execution | artifacts  (or 1-5)
 
 Environment:
   INTENT_FIRST_TEMPLATE_DIR     Override template directory path
@@ -24,29 +39,78 @@ Environment:
 EOF
 }
 
+# ── Input validation ───────────────────────────────────────────
+validate_workflow_id() {
+  local id="$1"
+  if [[ ! "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
+    echo "❌ Invalid workflow ID: $id"
+    echo "   Must start with alphanumeric, then alphanumeric/hyphens/underscores."
+    exit 1
+  fi
+  if [[ "$id" == *".."* ]]; then
+    echo "❌ Invalid workflow ID: $id"
+    exit 1
+  fi
+}
+
 next_number() {
   if [ ! -d "$WORKFLOW_DIR" ]; then
-    echo "001"
+    echo "1"
     return
   fi
   local max=0
-  for dir in "$WORKFLOW_DIR"/[0-9][0-9][0-9]; do
+  for dir in "$WORKFLOW_DIR"/*/; do
     [ -d "$dir" ] || continue
-    num=$(basename "$dir" | sed 's/^0*//')
-    [ -z "$num" ] && num=0
-    [ "$num" -gt "$max" ] && max=$num
+    local name
+    name=$(basename "$dir")
+    if [[ "$name" =~ ^[0-9]+$ ]]; then
+      local num=$((10#$name))
+      [ "$num" -gt "$max" ] && max=$num
+    fi
   done
-  printf "%03d" $((max + 1))
+  echo $((max + 1))
 }
 
+# ── Stage helpers ──────────────────────────────────────────────
+STAGE_FILES=("s1_intent.md" "s2_spec.md" "s3_plan.md" "s4_execution.md" "s5_artifacts.md")
+
+resolve_stage() {
+  case "$1" in
+    1|intent)    echo "s1_intent.md" ;;
+    2|spec)      echo "s2_spec.md" ;;
+    3|plan)      echo "s3_plan.md" ;;
+    4|execution) echo "s4_execution.md" ;;
+    5|artifacts) echo "s5_artifacts.md" ;;
+    *)           echo "" ;;
+  esac
+}
+
+# ── Commands ───────────────────────────────────────────────────
+
 cmd_new() {
-  local num
-  num=$(next_number)
-  local target="$WORKFLOW_DIR/$num"
+  if [ ! -d "$TEMPLATE_DIR" ]; then
+    echo "❌ Template directory not found: $TEMPLATE_DIR"
+    echo "   Run install.sh or set INTENT_FIRST_TEMPLATE_DIR"
+    exit 1
+  fi
+
+  local id="${1:-}"
+  if [ -z "$id" ]; then
+    id=$(next_number)
+  else
+    validate_workflow_id "$id"
+  fi
+
+  local target="$WORKFLOW_DIR/$id"
+
+  if [ -d "$target" ]; then
+    echo "❌ Workflow already exists: $target"
+    exit 1
+  fi
 
   mkdir -p "$target"
 
-  for tmpl in intent.md spec.md plan.md execution.md artifacts.md; do
+  for tmpl in "${STAGE_FILES[@]}"; do
     if [ -f "$TEMPLATE_DIR/$tmpl" ]; then
       cp "$TEMPLATE_DIR/$tmpl" "$target/$tmpl"
     else
@@ -54,76 +118,134 @@ cmd_new() {
     fi
   done
 
-  echo "✅ Created workflow $num → $target/"
+  echo "✅ Created workflow → $target/"
   echo ""
   echo "Next steps:"
-  echo "  1. Edit $target/intent.md with your goals"
-  echo "  2. Ask your AI agent: /wf-spec $num"
-  echo "  3. Review and approve, then: /wf-plan $num"
-  echo "  4. Review and approve, then: /wf-execution $num"
-  echo "  5. When done: /wf-artifacts $num"
+  echo "  1. Edit $target/s1_intent.md with your goals"
+  echo "  2. Tell your AI agent: /wf-spec $id"
+}
+
+cmd_lock() {
+  local id="${1:-}" stage_input="${2:-}"
+  if [ -z "$id" ] || [ -z "$stage_input" ]; then
+    echo "Usage: intent-first lock <ID> <STAGE>"
+    exit 1
+  fi
+  validate_workflow_id "$id"
+
+  local stage_file
+  stage_file=$(resolve_stage "$stage_input")
+  if [ -z "$stage_file" ]; then
+    echo "❌ Unknown stage: $stage_input"
+    echo "   Valid: intent, spec, plan, execution, artifacts (or 1-5)"
+    exit 1
+  fi
+
+  local target="$WORKFLOW_DIR/$id/$stage_file"
+  if [ ! -f "$target" ]; then
+    echo "❌ File not found: $target"
+    exit 1
+  fi
+  if [ -L "$target" ]; then
+    echo "❌ Refusing to lock symlink: $target"
+    exit 1
+  fi
+
+  chmod a-w "$target"
+  echo "🔒 Locked $target"
+}
+
+cmd_unlock() {
+  local id="${1:-}" stage_input="${2:-}"
+  if [ -z "$id" ] || [ -z "$stage_input" ]; then
+    echo "Usage: intent-first unlock <ID> <STAGE>"
+    exit 1
+  fi
+  validate_workflow_id "$id"
+
+  local stage_file
+  stage_file=$(resolve_stage "$stage_input")
+  if [ -z "$stage_file" ]; then
+    echo "❌ Unknown stage: $stage_input"
+    echo "   Valid: intent, spec, plan, execution, artifacts (or 1-5)"
+    exit 1
+  fi
+
+  local target="$WORKFLOW_DIR/$id/$stage_file"
+  if [ ! -f "$target" ]; then
+    echo "❌ File not found: $target"
+    exit 1
+  fi
+
+  chmod u+w "$target"
+  echo "🔓 Unlocked $target"
 }
 
 cmd_validate() {
-  local target_num="$1"
+  local target_id="${1:-}"
+  [ -n "$target_id" ] && validate_workflow_id "$target_id"
   local errors=0
   local checked=0
 
   validate_one() {
     local dir="$1"
-    local num
-    num=$(basename "$dir")
+    local id
+    id=$(basename "$dir")
     local issues=0
 
-    for f in intent.md spec.md plan.md execution.md artifacts.md; do
+    for f in "${STAGE_FILES[@]}"; do
       if [ ! -f "$dir/$f" ]; then
         echo "  ❌ Missing: $dir/$f"
         issues=$((issues + 1))
       fi
     done
 
-    # Check intent.md has title
-    if [ -f "$dir/intent.md" ]; then
-      if ! grep -q "^# Intent:" "$dir/intent.md"; then
-        echo "  ⚠️  $dir/intent.md: Missing '# Intent:' title"
+    if [ -f "$dir/s1_intent.md" ]; then
+      if ! grep -q "^# Intent:" "$dir/s1_intent.md"; then
+        echo "  ⚠️  $dir/s1_intent.md: Missing '# Intent:' title"
         issues=$((issues + 1))
       fi
     fi
 
-    # Check spec.md has required fields
-    if [ -f "$dir/spec.md" ]; then
+    if [ -f "$dir/s2_spec.md" ]; then
       for field in "Status:" "Decision Maker:" "Human Approval:"; do
-        if ! grep -q "$field" "$dir/spec.md"; then
-          echo "  ⚠️  $dir/spec.md: Missing '$field' field"
+        if ! grep -q "$field" "$dir/s2_spec.md"; then
+          echo "  ⚠️  $dir/s2_spec.md: Missing '$field'"
           issues=$((issues + 1))
         fi
       done
+      if grep -q "Approved.*Locked" "$dir/s2_spec.md" 2>/dev/null && [ -w "$dir/s2_spec.md" ]; then
+        echo "  ⚠️  $dir/s2_spec.md: Marked locked but writable (run: intent-first lock $id spec)"
+        issues=$((issues + 1))
+      fi
     fi
 
-    # Check plan.md has required fields
-    if [ -f "$dir/plan.md" ]; then
+    if [ -f "$dir/s3_plan.md" ]; then
       for field in "Status:" "Derived From:"; do
-        if ! grep -q "$field" "$dir/plan.md"; then
-          echo "  ⚠️  $dir/plan.md: Missing '$field' field"
+        if ! grep -q "$field" "$dir/s3_plan.md"; then
+          echo "  ⚠️  $dir/s3_plan.md: Missing '$field'"
           issues=$((issues + 1))
         fi
       done
+      if grep -q "Approved.*Locked" "$dir/s3_plan.md" 2>/dev/null && [ -w "$dir/s3_plan.md" ]; then
+        echo "  ⚠️  $dir/s3_plan.md: Marked locked but writable (run: intent-first lock $id plan)"
+        issues=$((issues + 1))
+      fi
     fi
 
     if [ "$issues" -eq 0 ]; then
-      echo "  ✅ Workflow $num: All files present and valid"
+      echo "  ✅ $id: OK"
     fi
-
     return $issues
   }
 
-  if [ -n "$target_num" ]; then
-    local dir="$WORKFLOW_DIR/$target_num"
+  if [ -n "$target_id" ]; then
+    local dir="$WORKFLOW_DIR/$target_id"
     if [ ! -d "$dir" ]; then
-      echo "❌ Workflow $target_num not found at $dir"
+      echo "❌ Workflow not found: $dir"
       exit 1
     fi
-    echo "Validating workflow $target_num..."
+    echo "Validating $target_id..."
     validate_one "$dir" || errors=$((errors + $?))
     checked=1
   else
@@ -131,7 +253,7 @@ cmd_validate() {
       echo "No workflow directory found."
       exit 0
     fi
-    for dir in "$WORKFLOW_DIR"/[0-9][0-9][0-9]; do
+    for dir in "$WORKFLOW_DIR"/*/; do
       [ -d "$dir" ] || continue
       echo "Validating $(basename "$dir")..."
       validate_one "$dir" || errors=$((errors + $?))
@@ -145,7 +267,7 @@ cmd_validate() {
   elif [ "$errors" -eq 0 ]; then
     echo "✅ All $checked workflow(s) valid."
   else
-    echo "⚠️  Found $errors issue(s) across $checked workflow(s)."
+    echo "⚠️  $errors issue(s) across $checked workflow(s)."
     exit 1
   fi
 }
@@ -156,45 +278,163 @@ cmd_list() {
     exit 0
   fi
 
-  printf "%-6s %-20s %-15s\n" "NUM" "TITLE" "STATUS"
-  printf "%-6s %-20s %-15s\n" "---" "---" "---"
+  printf "%-15s %-30s %-15s\n" "ID" "TITLE" "STATUS"
+  printf "%-15s %-30s %-15s\n" "---" "---" "---"
 
-  for dir in "$WORKFLOW_DIR"/[0-9][0-9][0-9]; do
+  for dir in "$WORKFLOW_DIR"/*/; do
     [ -d "$dir" ] || continue
-    local num
-    num=$(basename "$dir")
+    local id
+    id=$(basename "$dir")
     local title="(untitled)"
-    local status="intent"
+    local status="💡 intent"
 
-    # Extract title from intent.md
-    if [ -f "$dir/intent.md" ]; then
+    if [ -f "$dir/s1_intent.md" ]; then
       local t
-      t=$(grep "^# Intent:" "$dir/intent.md" | sed 's/^# Intent: *//' | head -1)
+      t=$(grep "^# Intent:" "$dir/s1_intent.md" | sed 's/^# Intent: *//' | head -1)
       [ -n "$t" ] && title="$t"
     fi
 
-    # Determine furthest stage (check for non-template content)
-    if [ -f "$dir/artifacts.md" ] && grep -q "^\*\*Status:\*\* Complete$" "$dir/artifacts.md" 2>/dev/null; then
+    if [ -f "$dir/s5_artifacts.md" ] && grep -q "^\*\*Status:\*\* Complete$" "$dir/s5_artifacts.md" 2>/dev/null; then
       status="✅ complete"
-    elif [ -f "$dir/execution.md" ] && grep -q "^\*\*Status:\*\* In Progress$" "$dir/execution.md" 2>/dev/null; then
+    elif [ -f "$dir/s4_execution.md" ] && grep -q "^\*\*Status:\*\* In Progress$" "$dir/s4_execution.md" 2>/dev/null; then
       status="⚙️  executing"
-    elif [ -f "$dir/plan.md" ] && grep -q "Approved.*Locked" "$dir/plan.md" 2>/dev/null; then
+    elif [ -f "$dir/s3_plan.md" ] && grep -q "Approved.*Locked" "$dir/s3_plan.md" 2>/dev/null; then
       status="📋 planned"
-    elif [ -f "$dir/spec.md" ] && grep -q "Approved.*Locked" "$dir/spec.md" 2>/dev/null; then
+    elif [ -f "$dir/s2_spec.md" ] && grep -q "Approved.*Locked" "$dir/s2_spec.md" 2>/dev/null; then
       status="📐 specified"
-    else
-      status="💡 intent"
     fi
 
-    printf "%-6s %-20s %-15s\n" "$num" "${title:0:20}" "$status"
+    printf "%-15s %-30s %-15s\n" "$id" "${title:0:30}" "$status"
   done
 }
 
-# Main
+# ── Implode ────────────────────────────────────────────────────
+INTENT_FIRST_MARKER="Intent-First"
+
+TOOL_RULES=(
+  ".github/copilot-instructions.md"
+  ".cursor/rules/intent-first.md"
+  "CLAUDE.md"
+  ".windsurfrules"
+  ".aider.rules.md"
+  ".clinerules"
+  ".antigravity/rules/intent-first.md"
+)
+
+TOOL_PROMPT_DIRS=(
+  ".github/prompts"
+  ".cursor/prompts"
+  ".claude/prompts"
+  ".windsurf/prompts"
+  ".antigravity/prompts"
+)
+
+INTENT_FIRST_PROMPTS=(
+  "wf-spec.prompt.md"
+  "wf-plan.prompt.md"
+  "wf-execution.prompt.md"
+  "wf-artifacts.prompt.md"
+  "wf-yolo.prompt.md"
+)
+
+check_rules_modified() {
+  local file="$1"
+  [ ! -f "$file" ] && return 1
+  [ -L "$file" ] && return 0
+
+  local marker_count
+  marker_count=$(grep -c "$INTENT_FIRST_MARKER" "$file" 2>/dev/null || echo "0")
+  [ "$marker_count" -eq 0 ] && return 0
+
+  local non_if_lines total_non_empty
+  non_if_lines=$(grep -v "$INTENT_FIRST_MARKER" "$file" | grep -v "^$" | grep -v "^#" | grep -v "^<!--" | grep -v "^-->" | grep -v "^>" | wc -l | tr -d ' ')
+  total_non_empty=$(grep -v "^$" "$file" | wc -l | tr -d ' ')
+
+  [ "$total_non_empty" -gt 0 ] && [ "$non_if_lines" -gt "$((total_non_empty / 2))" ] && return 0
+  return 1
+}
+
+cmd_implode() {
+  echo ""
+  echo -e "${BOLD:-}⚠️  Intent-First Implode${RESET:-}"
+  echo ""
+  echo "Removes all intent-first installed files. Workflow data is kept."
+  echo ""
+  printf "Type 'implode' to confirm: "
+  read -r confirm
+  [ "$confirm" != "implode" ] && echo "Aborted." && exit 0
+  echo ""
+
+  local unsafe_files=()
+  local removed=0
+
+  for dir in "${TOOL_PROMPT_DIRS[@]}"; do
+    if [ -d "$dir" ]; then
+      for prompt in "${INTENT_FIRST_PROMPTS[@]}"; do
+        local target="$dir/$prompt"
+        if [ -L "$target" ]; then
+          echo "  ⚠️  SKIPPED $target (symlink)"
+        elif [ -f "$target" ]; then
+          rm "$target"
+          echo "  ✓ Removed $target"
+          removed=$((removed + 1))
+        fi
+      done
+      [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ] && rmdir "$dir" && echo "  ✓ Removed empty $dir/"
+    fi
+  done
+
+  for rules_file in "${TOOL_RULES[@]}"; do
+    if [ -f "$rules_file" ]; then
+      if check_rules_modified "$rules_file"; then
+        unsafe_files+=("$rules_file")
+        echo "  ⚠️  SKIPPED $rules_file (has other content)"
+      else
+        rm "$rules_file"
+        echo "  ✓ Removed $rules_file"
+        removed=$((removed + 1))
+        local parent
+        parent=$(dirname "$rules_file")
+        [ -d "$parent" ] && [ "$parent" != "." ] && [ -z "$(ls -A "$parent" 2>/dev/null)" ] && rmdir "$parent"
+      fi
+    fi
+  done
+
+  [ -d ".intent-first/templates" ] && [ ! -L ".intent-first/templates" ] && rm -r ".intent-first/templates" && echo "  ✓ Removed .intent-first/templates/" && removed=$((removed + 1))
+  [ -f ".intent-first/bin/intent-first" ] && [ ! -L ".intent-first/bin/intent-first" ] && rm ".intent-first/bin/intent-first" && echo "  ✓ Removed .intent-first/bin/intent-first" && removed=$((removed + 1))
+  [ -d ".intent-first/bin" ] && [ -z "$(ls -A ".intent-first/bin" 2>/dev/null)" ] && rmdir ".intent-first/bin"
+
+  local global_cli="$HOME/.intent_first/bin/intent-first"
+  if [ -f "$global_cli" ]; then
+    rm "$global_cli"
+    echo "  ✓ Removed $global_cli"
+    removed=$((removed + 1))
+    [ -d "$HOME/.intent_first/bin" ] && [ -z "$(ls -A "$HOME/.intent_first/bin" 2>/dev/null)" ] && rmdir "$HOME/.intent_first/bin"
+    [ -d "$HOME/.intent_first" ] && [ -z "$(ls -A "$HOME/.intent_first" 2>/dev/null)" ] && rmdir "$HOME/.intent_first"
+  fi
+
+  [ -d ".intent-first" ] && [ -z "$(ls -A ".intent-first" 2>/dev/null)" ] && rmdir ".intent-first" && echo "  ✓ Removed .intent-first/"
+
+  echo ""
+  echo "✅ Removed $removed item(s)."
+
+  if [ ${#unsafe_files[@]} -gt 0 ]; then
+    echo ""
+    echo -e "${YELLOW:-}Files with mixed content (not deleted):${RESET:-}"
+    for f in "${unsafe_files[@]}"; do
+      echo "   $f — manually remove the Intent-First section"
+    done
+  fi
+}
+
+# ── Main ───────────────────────────────────────────────────────
 case "${1:-help}" in
-  new)        cmd_new ;;
+  new)        cmd_new "${2:-}" ;;
+  lock)       cmd_lock "${2:-}" "${3:-}" ;;
+  unlock)     cmd_unlock "${2:-}" "${3:-}" ;;
   validate)   cmd_validate "${2:-}" ;;
   list)       cmd_list ;;
+  implode)    cmd_implode ;;
   help|--help|-h) usage ;;
   *)          echo "Unknown command: $1"; usage; exit 1 ;;
 esac

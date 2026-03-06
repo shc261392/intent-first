@@ -3,7 +3,7 @@
 **Status:** Draft
 **Decision Maker:** [Agent name] on [YYYY-MM-DD HH:MM UTC]
 **Human Approval:** Pending
-**Derived From:** spec.md (locked)
+**Derived From:** s2_spec.md (locked)
 
 ---
 

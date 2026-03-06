@@ -9,20 +9,22 @@ Implement the approved plan with real-time progress tracking. Follow the plan ex
 ## Usage
 
 ```
-/wf-execution <workflow-number>
+/wf-execution <ID>
 ```
+
+ID is the workflow directory name (number or slug, e.g. `1`, `add-auth`).
 
 ## Prerequisites
 
-- `plan.md` must be **Approved — Locked**
+- `s3_plan.md` must be **Approved — Locked**
 - If not, redirect to `/wf-plan` first
 
 ## Process
 
 ### 1. Initialize
 
-1. Read `workflow/<number>/plan.md` completely
-2. Create progress checklist in `execution.md`
+1. Read `workflow/<ID>/s3_plan.md` completely
+2. Create progress checklist in `s4_execution.md`
 3. Record start time
 
 ### 2. Execute
@@ -39,13 +41,13 @@ For each step in the plan:
 If **anything** deviates from the plan:
 
 1. **Stop** execution
-2. **Document** in execution.md (issue or deviation)
+2. **Document** in s4_execution.md (issue or deviation)
 3. **Propose** resolution
 4. **Get human approval** before continuing
 
 ### 4. Continuous Updates
 
-Update `execution.md` after every significant action:
+Update `s4_execution.md` after every significant action:
 
 ```markdown
 ### [YYYY-MM-DD HH:MM UTC] - Agent: [Name]
@@ -70,7 +72,7 @@ Before marking complete:
 - ❌ Never skip steps from the plan
 - ❌ Never implement differently without approval
 - ❌ Never ignore failing tests
-- ❌ Never batch updates — update execution.md continuously
+- ❌ Never batch updates — update s4_execution.md continuously
 - ✅ Follow plan exactly as specified
 - ✅ Document every deviation with reason
 - ✅ Get human approval for ANY change from plan
@@ -78,5 +80,6 @@ Before marking complete:
 
 ## After Completion
 
-1. Update execution.md status: `Complete`
-2. Wait for instruction to proceed to `/wf-artifacts`
+1. Update s4_execution.md status: `Complete`
+2. Run in terminal: `intent-first lock <ID> execution` to enforce read-only
+3. Wait for instruction to proceed to `/wf-artifacts`

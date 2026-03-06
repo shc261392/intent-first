@@ -9,20 +9,22 @@ Draft a technical specification from the human-written intent document.
 ## Usage
 
 ```
-/wf-spec <workflow-number>
+/wf-spec <ID>
 ```
+
+ID is the workflow directory name (number or slug, e.g. `1`, `add-auth`).
 
 ## Process
 
 ### 1. Read Intent
 
-- Open `workflow/<number>/intent.md`
+- Open `workflow/<ID>/s1_intent.md`
 - Identify all scopes and requirements
 - Note ambiguities
 
 ### 2. Draft Specification
 
-Create `workflow/<number>/spec.md` with these required sections:
+Create `workflow/<ID>/s2_spec.md` with these required sections:
 
 1. **Overview** — How this addresses the intent
 2. **Design Decisions** — Architecture patterns, key technical choices
@@ -34,8 +36,8 @@ Create `workflow/<number>/spec.md` with these required sections:
 
 ### 3. Self-Assessment
 
-- Rate confidence 0–100%
-- If **<80%** on any decision → flag for human review immediately
+- Rate confidence 0–100% using the scoring model in project rules
+- If **<70%** on any decision → flag for human review immediately
 - Document assumptions
 
 ### 4. Request Human Approval
@@ -48,15 +50,16 @@ Create `workflow/<number>/spec.md` with these required sections:
 
 - ❌ Never proceed without human approval
 - ❌ Never make up requirements not in the intent
-- ❌ Never edit intent.md
+- ❌ Never edit s1_intent.md
 - ❌ Never include implementation details (save for plan stage)
 - ✅ Focus on "what" and "how" from a design perspective
 - ✅ Include complete quality gates and pass conditions
 - ✅ Document decision rationale with timestamps
-- ✅ Flag <80% confidence areas immediately
+- ✅ Flag <70% confidence areas immediately
 
 ## After Approval
 
-1. Update spec.md: `Human Approval: [Name] on [Date]`
+1. Update s2_spec.md: `Human Approval: [Name] on [Date]`
 2. Mark status: `Approved — Locked`
-3. Wait for instruction to proceed to `/wf-plan`
+3. Run in terminal: `intent-first lock <ID> spec` to enforce read-only
+4. Wait for instruction to proceed to `/wf-plan`

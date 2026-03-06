@@ -52,8 +52,8 @@ detect_downloader() {
 download() {
   local url="$1" dest="$2"
   case "$DOWNLOADER" in
-    curl) curl -fsSL "$url" -o "$dest" ;;
-    wget) wget -qO "$dest" "$url" ;;
+    curl) curl -fsSL --proto '=https' "$url" -o "$dest" ;;
+    wget) wget --https-only -qO "$dest" "$url" ;;
     *)    echo "No download tool found (need curl or wget)"; exit 1 ;;
   esac
 }
@@ -61,8 +61,8 @@ download() {
 download_text() {
   local url="$1"
   case "$DOWNLOADER" in
-    curl) curl -fsSL "$url" ;;
-    wget) wget -qO- "$url" ;;
+    curl) curl -fsSL --proto '=https' "$url" ;;
+    wget) wget --https-only -qO- "$url" ;;
   esac
 }
 
@@ -137,10 +137,10 @@ install_rules_to() {
 install_prompts_to() {
   local dest_dir="$1"
   mkdir -p "$dest_dir"
-  for prompt in wf-spec.prompt.md wf-plan.prompt.md wf-execution.prompt.md wf-artifacts.prompt.md; do
+  for prompt in wf-spec.prompt.md wf-plan.prompt.md wf-execution.prompt.md wf-artifacts.prompt.md wf-yolo.prompt.md; do
     download "$RAW/prompts/$prompt" "$dest_dir/$prompt"
   done
-  info "Installed 4 prompt files → $dest_dir/"
+  info "Installed 5 prompt files → $dest_dir/"
 }
 
 install_copilot() {
@@ -192,27 +192,56 @@ install_antigravity() {
 install_templates() {
   local dest=".intent-first/templates"
   mkdir -p "$dest"
-  for tmpl in intent.md spec.md plan.md execution.md artifacts.md; do
+  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md; do
     download "$RAW/templates/$tmpl" "$dest/$tmpl"
   done
   info "Installed 5 templates → $dest/"
 }
 
-# ── Install CLI ────────────────────────────────────────────────
+# ── Install CLI (global) ──────────────────────────────────────
 install_cli() {
-  local dest=".intent-first/bin/intent-first"
-  mkdir -p "$(dirname "$dest")"
+  local global_dir="$HOME/.intent_first/bin"
+  local dest="$global_dir/intent-first"
+  mkdir -p "$global_dir"
   download "$RAW/cli/intent-first" "$dest"
   chmod +x "$dest"
   info "Installed CLI → $dest"
   echo ""
-  echo "  Add to your package.json scripts:"
-  echo "    \"wf:new\": \".intent-first/bin/intent-first new\""
-  echo "    \"wf:validate\": \".intent-first/bin/intent-first validate\""
-  echo "    \"wf:list\": \".intent-first/bin/intent-first list\""
-  echo ""
-  echo "  Or add to PATH:"
-  echo "    export PATH=\"\$PWD/.intent-first/bin:\$PATH\""
+
+  # Suggest PATH addition if not already there
+  if ! echo "$PATH" | tr ':' '\n' | grep -qx "$global_dir"; then
+    echo "  Add to your shell profile (~/.zshrc, ~/.bashrc, etc.):"
+    echo "    export PATH=\"\$HOME/.intent_first/bin:\$PATH\""
+    echo ""
+  fi
+
+  echo "  Or use directly:"
+  echo "    $dest new"
+}
+
+# ── Ensure .gitignore covers workflow data ─────────────────────
+install_gitignore() {
+  local gitignore=".gitignore"
+  local marker=".intent-first/"
+
+  if [ -f "$gitignore" ]; then
+    if ! grep -qF "$marker" "$gitignore" 2>/dev/null; then
+      echo "" >> "$gitignore"
+      echo "# Intent-First workflow (ephemeral)" >> "$gitignore"
+      echo ".intent-first/" >> "$gitignore"
+      echo "workflow/" >> "$gitignore"
+      info "Appended .intent-first/ and workflow/ to .gitignore"
+    else
+      info ".gitignore already covers .intent-first/ (skipped)"
+    fi
+  else
+    cat > "$gitignore" <<'GITIGNORE'
+# Intent-First workflow (ephemeral)
+.intent-first/
+workflow/
+GITIGNORE
+    info "Created .gitignore with .intent-first/ and workflow/"
+  fi
 }
 
 # ── Main ───────────────────────────────────────────────────────
@@ -255,11 +284,15 @@ done
 header "⚡ Installing CLI..."
 install_cli
 
+header "📝 Configuring .gitignore..."
+install_gitignore
+
 header "✅ Intent-First installed!"
 echo ""
 echo "  Get started:"
-echo "    1. Run:  .intent-first/bin/intent-first new"
-echo "    2. Edit: workflow/001/intent.md"
-echo "    3. Ask your AI agent: /wf-spec 001"
+echo "    1. Run:  intent-first new"
+echo "    2. Edit: workflow/1/s1_intent.md"
+echo "    3. Ask your AI agent: /wf-spec 1"
 echo ""
+echo "  Workflow data is ephemeral and gitignored."
 echo "  Docs: https://github.com/$REPO"

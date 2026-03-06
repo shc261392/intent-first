@@ -9,19 +9,21 @@ Create a detailed implementation plan from the approved specification.
 ## Usage
 
 ```
-/wf-plan <workflow-number>
+/wf-plan <ID>
 ```
+
+ID is the workflow directory name (number or slug, e.g. `1`, `add-auth`).
 
 ## Prerequisites
 
-- `spec.md` must be **Approved — Locked**
+- `s2_spec.md` must be **Approved — Locked**
 - If not, redirect to `/wf-spec` first
 
 ## Process
 
 ### 1. Review Specification
 
-- Read `workflow/<number>/spec.md` completely
+- Read `workflow/<ID>/s2_spec.md` completely
 - Understand all design decisions and constraints
 - Note quality gates and deliverables
 
@@ -33,7 +35,7 @@ Create a detailed implementation plan from the approved specification.
 
 ### 3. Draft Plan
 
-Create `workflow/<number>/plan.md` with these required sections:
+Create `workflow/<ID>/s3_plan.md` with these required sections:
 
 1. **Implementation Overview** — Summary of approach
 2. **Files to be Modified** — New, modified, deleted files with purposes
@@ -66,10 +68,11 @@ Create `workflow/<number>/plan.md` with these required sections:
 - ✅ Strictly follow all spec decisions
 - ✅ Include complete function signatures with types
 - ✅ Plan comprehensive test coverage
-- ✅ Mark as "Derived From: spec.md (locked)"
+- ✅ Mark as "Derived From: s2_spec.md (locked)"
 
 ## After Approval
 
-1. Update plan.md: `Human Approval: [Name] on [Date]`
+1. Update s3_plan.md: `Human Approval: [Name] on [Date]`
 2. Mark status: `Approved — Locked`
-3. Wait for instruction to proceed to `/wf-execution`
+3. Run in terminal: `intent-first lock <ID> plan` to enforce read-only
+4. Wait for instruction to proceed to `/wf-execution`

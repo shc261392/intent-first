@@ -1,0 +1,107 @@
+name: Install & CLI Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create test project directory
+        run: |
+          mkdir -p /tmp/test-project/.github
+          cd /tmp/test-project
+          git init
+
+      - name: Test install.sh runs without errors
+        run: |
+          cd /tmp/test-project
+          bash "$GITHUB_WORKSPACE/install.sh"
+
+      - name: Verify templates installed
+        run: |
+          cd /tmp/test-project
+          test -f .intent-first/templates/s1_intent.md
+          test -f .intent-first/templates/s2_spec.md
+          test -f .intent-first/templates/s3_plan.md
+          test -f .intent-first/templates/s4_execution.md
+          test -f .intent-first/templates/s5_artifacts.md
+          echo "All templates present"
+
+      - name: Verify CLI installed globally
+        run: |
+          test -x "$HOME/.intent_first/bin/intent-first"
+          echo "CLI is executable at ~/.intent_first/bin/"
+
+      - name: Verify .gitignore updated
+        run: |
+          cd /tmp/test-project
+          grep -q '.intent-first/' .gitignore
+          grep -q 'workflow/' .gitignore
+          echo ".gitignore covers ephemeral dirs"
+
+      - name: Test CLI help
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" help
+
+      - name: Test CLI new workflow
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" new
+          test -d workflow/1
+          test -f workflow/1/s1_intent.md
+          test -f workflow/1/s2_spec.md
+          test -f workflow/1/s3_plan.md
+          test -f workflow/1/s4_execution.md
+          test -f workflow/1/s5_artifacts.md
+          echo "Workflow 1 created with all stage files"
+
+      - name: Test CLI lock and unlock
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" lock 1 intent
+          ! test -w workflow/1/s1_intent.md
+          echo "Lock works (file is read-only)"
+          "$HOME/.intent_first/bin/intent-first" unlock 1 intent
+          test -w workflow/1/s1_intent.md
+          echo "Unlock works (file is writable)"
+
+      - name: Test CLI validate
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" validate 1
+
+      - name: Test CLI list
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" list
+
+      - name: Test CLI auto-numbering
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" new
+          test -d workflow/2
+          echo "Auto-numbering works (2 created)"
+
+      - name: Test CLI named workflow (slug)
+        run: |
+          cd /tmp/test-project
+          "$HOME/.intent_first/bin/intent-first" new add-auth
+          test -d workflow/add-auth
+          test -f workflow/add-auth/s1_intent.md
+          echo "Named workflow created"
+
+      - name: Test unknown command fails
+        run: |
+          cd /tmp/test-project
+          ! "$HOME/.intent_first/bin/intent-first" nonexistent
+          echo "Unknown command correctly rejected"

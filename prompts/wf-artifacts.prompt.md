@@ -9,12 +9,14 @@ Document final outcomes, capture lessons learned, and close the workflow.
 ## Usage
 
 ```
-/wf-artifacts <workflow-number>
+/wf-artifacts <ID>
 ```
+
+ID is the workflow directory name (number or slug, e.g. `1`, `add-auth`).
 
 ## Prerequisites
 
-- `execution.md` shows status **Complete**
+- `s4_execution.md` shows status **Complete**
 - All tests passing, all deliverables met
 - If not, redirect to `/wf-execution` first
 
@@ -31,16 +33,16 @@ Document final outcomes, capture lessons learned, and close the workflow.
 
 Collect from:
 
-- `intent.md` — Original goals
-- `spec.md` — Design decisions
-- `plan.md` — Implementation details
-- `execution.md` — What actually happened
+- `s1_intent.md` — Original goals
+- `s2_spec.md` — Design decisions
+- `s3_plan.md` — Implementation details
+- `s4_execution.md` — What actually happened
 - Git diff — Actual file changes
 - Test results — Quality verification
 
 ### 3. Document Artifacts
 
-Create `workflow/<number>/artifacts.md` with:
+Create `workflow/<ID>/s5_artifacts.md` with:
 
 1. **Summary** — What was accomplished, how it fulfills intent
 2. **Code Changes** — Files created, modified, deleted (with links)
@@ -68,7 +70,8 @@ Create `workflow/<number>/artifacts.md` with:
 
 ## Completion
 
-1. Update status: `Complete`
+1. Update s5_artifacts.md status: `Complete`
 2. Record completion timestamp
-3. Present summary to human
-4. Workflow is now closed
+3. Run in terminal: `intent-first lock <ID> artifacts` to enforce read-only
+4. Present summary to human
+5. Workflow is now closed
