@@ -167,32 +167,45 @@ install_prompts_to() {
   info "Installed 5 prompt files → $dest_dir/"
 }
 
+install_agents_to() {
+  local dest_dir="$1"
+  mkdir -p "$dest_dir"
+  for agent in wf-updater.prompt.md wf-auditor.prompt.md; do
+    download "$RAW/agents/$agent" "$dest_dir/$agent"
+  done
+  info "Installed 2 agent files → $dest_dir/"
+}
+
 install_copilot() {
   step "Installing for GitHub Copilot (VS Code / CLI)..."
-  mkdir -p .github/prompts
+  mkdir -p .github/prompts .github/agents
   install_rules_to ".github/copilot-instructions.md"
   install_prompts_to ".github/prompts"
+  install_agents_to ".github/agents"
 }
 
 install_cursor() {
   step "Installing for Cursor..."
-  mkdir -p .cursor/prompts
+  mkdir -p .cursor/prompts .cursor/agents
   install_rules_to ".cursor/rules/intent-first.md"
   install_prompts_to ".cursor/prompts"
+  install_agents_to ".cursor/agents"
 }
 
 install_claude() {
   step "Installing for Claude Code..."
   install_rules_to "CLAUDE.md"
-  mkdir -p .claude/prompts
+  mkdir -p .claude/prompts .claude/agents
   install_prompts_to ".claude/prompts"
+  install_agents_to ".claude/agents"
 }
 
 install_windsurf() {
   step "Installing for Windsurf..."
   install_rules_to ".windsurfrules"
-  mkdir -p .windsurf/prompts
+  mkdir -p .windsurf/prompts .windsurf/agents
   install_prompts_to ".windsurf/prompts"
+  install_agents_to ".windsurf/agents"
 }
 
 install_aider() {
@@ -208,8 +221,9 @@ install_cline() {
 install_antigravity() {
   step "Installing for Antigravity..."
   install_rules_to ".antigravity/rules/intent-first.md"
-  mkdir -p .antigravity/prompts
+  mkdir -p .antigravity/prompts .antigravity/agents
   install_prompts_to ".antigravity/prompts"
+  install_agents_to ".antigravity/agents"
 }
 
 # ── Install global rules ───────────────────────────────────────
