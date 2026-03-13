@@ -1,67 +1,35 @@
 # Implementation Plan: [Descriptive title]
 
-**Status:** Draft
-**Decision Maker:** [Agent name] on [YYYY-MM-DD HH:MM UTC]
-**Human Approval:** Pending
-**Derived From:** s2_spec.md (locked)
+[TL;DR — what, why, and recommended approach.]
+
+## Phases
+
+### Phase 1: [Name]
+
+1. [Step with full detail — file path, function signature, behavior]
+   - *depends on: —*
+2. [Step]
+   - *parallel with: step 1*
+
+### Phase 2: [Name]
+
+1. [Step]
+   - *depends on: Phase 1*
+
+## Relevant Files
+
+- `full/path/to/file` — [What to modify or reuse, referencing specific functions/patterns]
+- `full/path/to/file` — [What to modify or reuse]
+
+## Verification
+
+1. [Specific verification — exact test commands, type-check commands, manual checks]
+2. [Quality checks mapped to spec quality gates]
+
+## Decisions
+
+- [Decisions, assumptions, included/excluded scope — all derived from spec]
 
 ---
 
-## Implementation Overview
-
-[Brief summary of the implementation approach]
-
-## Files to be Modified
-
-### New Files
-
-- `path/to/new-file` - [Purpose]
-
-### Modified Files
-
-- `path/to/existing-file` - [Changes]
-
-## Detailed Implementation
-
-### Component/Module 1: [Name]
-
-**Purpose:** [What this component does]
-
-**Key Functions/Classes:**
-
-#### `functionName(param: Type): ReturnType`
-
-- **Purpose:** [Description]
-- **Parameters:**
-  - `param`: [Description]
-- **Returns:** [Description]
-- **Implementation notes:** [Key details]
-
-## Testing Strategy
-
-### Unit Tests
-
-- [ ] Test [scenario 1]
-- [ ] Test [scenario 2]
-
-### Integration Tests
-
-- [ ] Test [integration scenario 1]
-
-### E2E Tests
-
-- [ ] Test [user flow 1]
-
-## Validation Steps
-
-1. [Step-by-step validation process]
-2. [Quality checks to perform]
-
-## Dependencies & Prerequisites
-
-- [Any dependencies that must be installed]
-- [Any setup steps required]
-
----
-
-**Human Approval Required:** This plan strictly follows the spec. Any deviation during execution will require human approval.
+**Human Approval Required.** This plan strictly follows the locked spec. Any deviation during execution requires human approval.

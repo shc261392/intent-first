@@ -10,6 +10,7 @@ set -euo pipefail
 REPO="shc261392/intent-first"
 BRANCH="main"
 RAW="https://raw.githubusercontent.com/$REPO/$BRANCH"
+INTENT_FIRST_HOME="${INTENT_FIRST_HOME:-$HOME/.intent-first}"
 
 # Colors (if terminal supports it)
 if [ -t 1 ]; then
@@ -142,19 +143,17 @@ detect_tools() {
 
 install_rules_to() {
   local dest="$1"
+  local one_liner="For the Intent-First Agentic Workflow, see \`.intent-first/rules.md\`."
   mkdir -p "$(dirname "$dest")"
   if [ -f "$dest" ]; then
-    # Append if file exists and doesn't already have intent-first
-    if ! grep -q "Intent-First" "$dest" 2>/dev/null; then
-      echo "" >> "$dest"
-      echo "<!-- intent-first workflow rules -->" >> "$dest"
-      download_text "$RAW/rules/RULES.md" >> "$dest"
-      info "Appended rules to $dest"
+    if ! grep -qi "intent-first" "$dest" 2>/dev/null; then
+      printf '\n%s\n' "$one_liner" >> "$dest"
+      info "Added Intent-First reference → $dest"
     else
-      warn "$dest already contains Intent-First rules (skipped)"
+      warn "$dest already references Intent-First (skipped)"
     fi
   else
-    download "$RAW/rules/RULES.md" "$dest"
+    printf '%s\n' "$one_liner" > "$dest"
     info "Created $dest"
   fi
 }
@@ -213,22 +212,41 @@ install_antigravity() {
   install_prompts_to ".antigravity/prompts"
 }
 
-# ── Install templates ──────────────────────────────────────────
+# ── Install global rules ───────────────────────────────────────
+install_global_rules() {
+  local dest="$INTENT_FIRST_HOME/rules.md"
+  mkdir -p "$(dirname "$dest")"
+  download "$RAW/rules/RULES.md" "$dest"
+  info "Installed rules → $dest"
+}
+
+# ── Install templates (global) ─────────────────────────────────
 install_templates() {
-  local dest=".intent-first/templates"
+  local dest="$INTENT_FIRST_HOME/templates"
+  if [ -d "$dest" ]; then
+    local bk="${dest}.bk"
+    [ -d "$bk" ] && rm -rf "$bk"
+    cp -r "$dest" "$bk"; info "Backed up templates → $(basename "$bk")"
+  fi
   mkdir -p "$dest"
-  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md; do
+  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md status.yml; do
     download "$RAW/templates/$tmpl" "$dest/$tmpl"
   done
-  info "Installed 5 templates → $dest/"
+  info "Installed 6 templates → $dest/"
 }
 
 # ── Install CLI (global) ──────────────────────────────────────
 install_cli() {
-  local global_dir="$HOME/.intent_first/bin"
+  local global_dir="$INTENT_FIRST_HOME/bin"
   local dest="$global_dir/intent-first"
   local shell_name profile_path export_line
-  
+
+  if ! command -v python3 &>/dev/null; then
+    echo "Error: python3 is required but not found."
+    echo "  Install Python 3.8+ and re-run this installer."
+    exit 1
+  fi
+
   mkdir -p "$global_dir"
   download "$RAW/cli/intent-first" "$dest"
   chmod +x "$dest"
@@ -237,41 +255,17 @@ install_cli() {
 
   shell_name=$(detect_shell)
   profile_path=$(get_shell_profile "$shell_name")
-  export_line="export PATH=\"\$HOME/.intent_first/bin:\$PATH\""
-  
-  echo "  ${BOLD}Add to PATH:${RESET}"
-  echo "    ${GREEN}${profile_path}${RESET}"
-  echo ""
-  echo "  ${CYAN}Copy & paste:${RESET}"
-  echo "    echo '$export_line' >> $profile_path"
-  echo "    source $profile_path"
-  echo ""
-  echo "  ${BOLD}Quick start:${RESET}"
-  echo "    intent-first new"
-}
+  export_line="export PATH=\"\$HOME/.intent-first/bin:\$PATH\""
 
-# ── Ensure .gitignore covers workflow data ─────────────────────
-install_gitignore() {
-  local gitignore=".gitignore"
-  local marker=".intent-first/"
-
-  if [ -f "$gitignore" ]; then
-    if ! grep -qF "$marker" "$gitignore" 2>/dev/null; then
-      echo "" >> "$gitignore"
-      echo "# Intent-First workflow (ephemeral)" >> "$gitignore"
-      echo ".intent-first/" >> "$gitignore"
-      echo "workflow/" >> "$gitignore"
-      info "Appended .intent-first/ and workflow/ to .gitignore"
-    else
-      info ".gitignore already covers .intent-first/ (skipped)"
-    fi
+  if ! path_contains "$global_dir"; then
+    echo "  ${BOLD}Add to PATH:${RESET}"
+    echo "    ${GREEN}${profile_path}${RESET}"
+    echo ""
+    echo "  ${CYAN}Copy & paste:${RESET}"
+    echo "    echo '$export_line' >> $profile_path"
+    echo "    source $profile_path"
   else
-    cat > "$gitignore" <<'GITIGNORE'
-# Intent-First workflow (ephemeral)
-.intent-first/
-workflow/
-GITIGNORE
-    info "Created .gitignore with .intent-first/ and workflow/"
+    info "$global_dir already in PATH"
   fi
 }
 
@@ -296,10 +290,14 @@ info "Using: $DOWNLOADER"
 TOOLS=($(detect_tools))
 info "Detected tools: ${TOOLS[*]}"
 
-header "📄 Installing templates..."
-install_templates
+header "⚡ Installing CLI..."
+install_cli
 
-header "📐 Installing rules & prompts..."
+header "📦 Installing global templates & rules..."
+install_templates
+install_global_rules
+
+header "📐 Adding tool references..."
 for tool in "${TOOLS[@]}"; do
   case "$tool" in
     copilot)     install_copilot ;;
@@ -312,18 +310,18 @@ for tool in "${TOOLS[@]}"; do
   esac
 done
 
-header "⚡ Installing CLI..."
-install_cli
-
-header "📝 Configuring .gitignore..."
-install_gitignore
-
 header "✅ Intent-First installed!"
 echo ""
-echo "  Get started:"
+echo "  Next: initialize each project that will use Intent-First:"
+echo ""
+echo "    cd your-project"
+echo "    intent-first init"
+echo ""
+echo "  This copies rules.md into the project and adds the workflow folder to .gitignore."
+echo ""
+echo "  Then start a workflow:"
 echo "    1. Run:  intent-first new"
-echo "    2. Edit: workflow/1/s1_intent.md"
+echo "    2. Edit: .intent-first/workflows/1/s1_intent.md"
 echo "    3. Ask your AI agent: /wf-spec 1"
 echo ""
-echo "  Workflow data is ephemeral and gitignored."
 echo "  Docs: https://github.com/$REPO"

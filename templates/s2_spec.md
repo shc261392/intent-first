@@ -1,58 +1,44 @@
 # Specification: [Descriptive title matching intent]
 
-**Status:** Draft
-**Decision Maker:** [Agent name] on [YYYY-MM-DD HH:MM UTC]
-**Human Approval:** Pending
-
----
-
 ## Overview
 
-[Brief summary of how this spec addresses the intent]
+[How this spec addresses every requirement in the intent. Map each intent item to a design element.]
 
 ## Design Decisions
 
-### Architecture
+### [Decision Title]
 
-[Key architectural patterns and design decisions]
+**Context:** [Why this decision is needed]
+**Options:** [Alternatives considered with trade-offs]
+**Decision:** [Chosen approach]
+**Rationale:** [Why this is the best choice]
 
-### Public Interfaces
+## Public Interfaces
 
-[API endpoints, function signatures, component props, etc.]
+[API endpoints, function signatures, component props — types and contracts only, no implementations.]
 
-### Constraints & Requirements
+## Constraints & Requirements
 
-[Technical constraints, performance requirements, compatibility needs]
+[Performance, security, compatibility, edge cases.]
 
 ## Quality Gates
 
-### Testing Requirements
-
-- [ ] Unit tests for [specific components]
-- [ ] Integration tests for [specific flows]
-- [ ] E2E tests for [specific user journeys]
-
-### Performance Benchmarks
-
-- [ ] [Specific performance metrics to achieve]
-
-### Documentation
-
-- [ ] [Required documentation updates]
+- [ ] [Specific, measurable test or benchmark]
+- [ ] [Specific, measurable test or benchmark]
 
 ## Deliverables
 
-1. [Clearly defined deliverable 1]
-2. [Clearly defined deliverable 2]
+1. [Deliverable → mapped intent item]
+2. [Deliverable → mapped intent item]
 
 ## Pass Conditions
 
-- [ ] All quality gates completed
+- [ ] All quality gates met
 - [ ] All deliverables implemented
 - [ ] All tests passing
-- [ ] Code review completed
-- [ ] Documentation updated
+- [ ] [Additional project-specific criteria]
 
 ---
 
-**Human Review Required:** Agent confidence in this spec is [X]%. Please review and approve before proceeding to planning phase.
+**Confidence:** [X]% — [Brief rationale or areas of uncertainty].
+**Human Review Required** before proceeding to planning.

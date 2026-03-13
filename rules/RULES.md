@@ -1,7 +1,7 @@
 <!-- Intent-First Workflow — Agent Rules -->
-<!-- Add this to your AI coding tool's instruction file to enable -->
-<!-- the Intent-First agentic workflow in your project -->
-<!-- For tool-specific locations, see the install script or README -->
+<!-- Installed globally at ~/.intent-first/rules.md and per-project at .intent-first/rules.md -->
+<!-- Run 'intent-first init' in each project to copy project-local rules -->
+<!-- For install instructions, see https://github.com/shc261392/intent-first -->
 
 # Intent-First Agentic Workflow
 
@@ -126,13 +126,14 @@ Based on agentic calibration research (Zhang et al. 2026, Yang et al. 2026, Mao 
 
 ### Creating a New Workflow
 
-Run the CLI or manually create `workflow/<ID>/` with these files:
+Run `intent-first new` from your project root, or manually create `.intent-first/workflows/<ID>/` with these files:
 
 - `s1_intent.md` — Human-written goals (human only)
 - `s2_spec.md` — Technical specification (agent drafts, human approves)
 - `s3_plan.md` — Implementation plan (agent drafts, human approves)
 - `s4_execution.md` — Progress tracking (agent updates continuously)
 - `s5_artifacts.md` — Final outcomes (agent documents)
+- `status.yml` — Stage statuses and approval metadata (updated by `intent-first lock`)
 
 ### Stage Prompts
 

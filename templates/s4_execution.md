@@ -1,10 +1,6 @@
 # Execution Log: [Descriptive title]
 
-**Status:** [Pending]
 **Started:** [YYYY-MM-DD HH:MM UTC]
-**Plan Status:** Locked (no further modifications allowed)
-
----
 
 ## Progress Checklist
 
@@ -41,7 +37,7 @@
 [How it was resolved]
 
 **Decision Maker:** [Agent name or Human name]
-**Approved By:** [Human name if required] on [YYYY-MM-DD HH:MM UTC]
+**Approved By:** [Human name if required]
 
 ## Deviations from Plan
 
@@ -52,8 +48,8 @@
 **Actual Implementation:** [What was actually done]
 **Impact:** [How this affects other parts]
 **Decision Maker:** [Agent name]
-**Human Approval:** [Human name] on [YYYY-MM-DD HH:MM UTC]
+**Human Approval:** [Human name] — update status.yml after approval
 
 ---
 
-**⚠️ This file is continuously updated by agents during execution. Any deviation from the plan requires human approval.**
+**⚠️ This file is updated CONTINUOUSLY by agents during execution — not in batches. Any deviation from the plan requires human approval.**

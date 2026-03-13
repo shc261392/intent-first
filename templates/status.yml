@@ -1,0 +1,35 @@
+# Intent-First Workflow Status
+# Updated automatically by agents at each stage transition.
+# Do not edit manually unless resolving a stuck state.
+# See .intent-first/rules.md for valid status values and transition rules.
+
+workflow_id: ""
+
+stages:
+  intent:
+    status: draft       # draft | locked
+    locked_at: ""       # ISO 8601 UTC
+
+  spec:
+    status: pending     # pending | draft | approved | locked
+    approved_by: ""     # human name
+    approved_at: ""     # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+
+  plan:
+    status: pending     # pending | draft | approved | locked
+    derived_from: "s2_spec.md"
+    approved_by: ""     # human name
+    approved_at: ""     # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+
+  execution:
+    status: pending     # pending | in_progress | complete | locked
+    started_at: ""      # ISO 8601 UTC
+    completed_at: ""    # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+
+  artifacts:
+    status: pending     # pending | draft | complete | locked
+    completed_at: ""    # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC

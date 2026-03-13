@@ -1,11 +1,5 @@
 # Workflow Artifacts: [Descriptive title]
 
-**Status:** [Pending]
-**Completed:** [YYYY-MM-DD HH:MM UTC]
-**Final Review By:** [Agent name]
-
----
-
 ## Summary
 
 [Brief summary of what was accomplished in this workflow]
@@ -51,7 +45,7 @@
 **Options Considered:** [What alternatives were evaluated]
 **Decision:** [What was chosen]
 **Rationale:** [Why this was the best choice]
-**Decided By:** [Agent/Human name] on [Date]
+**Decided By:** [Agent/Human name]
 
 ## Lessons Learned
 
@@ -82,7 +76,13 @@
 
 ## Related Workflows
 
-- [workflow/XXX](../XXX/intent.md) - [Relationship description]
+- [.intent-first/workflows/XXX](../XXX/s1_intent.md) - [Relationship description]
+
+## YOLO Decision Log (if applicable)
+
+| #   | Stage | Decision   | Confidence | Rationale   |
+| --- | ----- | ---------- | ---------- | ----------- |
+| 1   | Spec  | [Decision] | [X]%       | [Rationale] |
 
 ---
 

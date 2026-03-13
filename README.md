@@ -56,17 +56,18 @@ flowchart LR
 curl -fsSL https://raw.githubusercontent.com/shc261392/intent-first/main/install.sh | bash
 ```
 
-This auto-detects your AI tools (Copilot, Cursor, Claude Code, Windsurf, Aider, Cline, Antigravity) and installs rules + prompts into each tool's config location. A small CLI goes to `~/.intent_first/bin/`.
+This auto-detects your AI tools (Copilot, Cursor, Claude Code, Windsurf, Aider, Cline, Antigravity) and installs the CLI and templates globally to `~/.intent-first/`. Then run `intent-first init` in each project to set up local rules and gitignore.
 
-Workflow data (`workflow/`) is **ephemeral and gitignored** — like chat history, it structures your process but isn't version-controlled. Commit specific outcomes explicitly when you want to keep them.
+Workflow data (`.intent-first/workflows/`) is **ephemeral and gitignored** — like chat history, it structures your process but isn't version-controlled. Commit specific outcomes explicitly when you want to keep them.
 
 <details>
 <summary><b>Manual install</b></summary>
 
-1. Copy `rules/RULES.md` content into your AI tool's instruction file
-2. Copy `prompts/wf-*.prompt.md` into your tool's prompts directory
-3. Copy `templates/` to `.intent-first/templates/`
-4. Copy `cli/intent-first` to `~/.intent_first/bin/intent-first`
+1. Copy `rules/RULES.md` content into your AI tool's instruction file (or use the one-liner: `For the Intent-First Agentic Workflow, see \`.intent-first/rules.md\`.`)
+2. Copy `rules/RULES.md` to `.intent-first/rules.md` in your project
+3. Copy `prompts/wf-*.prompt.md` into your tool's prompts directory
+4. Copy `templates/` to `~/.intent-first/templates/`
+5. Copy `cli/intent-first` to `~/.intent-first/bin/intent-first`
 
 </details>
 
@@ -90,15 +91,15 @@ Workflow data (`workflow/`) is **ephemeral and gitignored** — like chat histor
 ### 1. Create a workflow
 
 ```bash
-intent-first new            # → workflow/1/
-intent-first new add-auth   # → workflow/add-auth/
+intent-first new            # → .intent-first/workflows/1/
+intent-first new add-auth   # → .intent-first/workflows/add-auth/
 ```
 
 No name? Auto-numbered. Got a name? Use it. The command stays short either way.
 
 ### 2. Write your intent
 
-Edit `workflow/1/s1_intent.md`. Write **what** you want and **why** — not how to build it.
+Edit `.intent-first/workflows/1/s1_intent.md`. Write **what** you want and **why** — not how to build it.
 
 ### 3. Walk through the stages
 

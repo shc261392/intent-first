@@ -1,439 +1,785 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # intent-first — Minimal CLI for Intent-First Workflow
 # https://github.com/shc261392/intent-first
-set -euo pipefail
+# Requires Python 3.8+, zero external dependencies
 
-WORKFLOW_DIR="workflow"
-TEMPLATE_DIR="${INTENT_FIRST_TEMPLATE_DIR:-.intent-first/templates}"
+from __future__ import annotations
 
-# Colors (if terminal supports it)
-if [ -t 1 ]; then
-  BOLD='\033[1m'
-  GREEN='\033[0;32m'
-  YELLOW='\033[0;33m'
-  RESET='\033[0m'
-else
-  BOLD='' GREEN='' YELLOW='' RESET=''
-fi
+import json
+import os
+import re
+import shutil
+import stat
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.request import Request, urlopen
 
-usage() {
-  cat <<'EOF'
-intent-first — Agentic workflow CLI
+VERSION = "0.2.0"
+REPO    = "shc261392/intent-first"
+RAW     = f"https://raw.githubusercontent.com/{REPO}/main"
+
+INTENT_FIRST_HOME = Path(os.environ.get("INTENT_FIRST_HOME", Path.home() / ".intent-first"))
+WORKFLOW_DIR      = Path(os.environ.get("INTENT_FIRST_WORKFLOW_DIR", ".intent-first/workflows"))
+TEMPLATE_DIR      = Path(os.environ.get("INTENT_FIRST_TEMPLATE_DIR", INTENT_FIRST_HOME / "templates"))
+VERSION_CACHE     = INTENT_FIRST_HOME / ".version-cache"
+VERSION_CHECK_TTL = 2592000  # 30 days in seconds
+
+STAGE_FILES = [
+    "s1_intent.md", "s2_spec.md", "s3_plan.md",
+    "s4_execution.md", "s5_artifacts.md", "status.yml",
+]
+
+TOOL_RULES = [
+    ".github/copilot-instructions.md",
+    ".cursor/rules/intent-first.md",
+    "CLAUDE.md",
+    ".windsurfrules",
+    ".aider.rules.md",
+    ".clinerules",
+    ".antigravity/rules/intent-first.md",
+]
+
+TOOL_PROMPT_DIRS = [
+    ".github/prompts",
+    ".cursor/prompts",
+    ".claude/prompts",
+    ".windsurf/prompts",
+    ".antigravity/prompts",
+]
+
+INTENT_FIRST_PROMPTS = [
+    "wf-spec.prompt.md",
+    "wf-plan.prompt.md",
+    "wf-execution.prompt.md",
+    "wf-artifacts.prompt.md",
+    "wf-yolo.prompt.md",
+]
+
+# ── Colors ────────────────────────────────────────────────────
+
+_tty = sys.stdout.isatty()
+
+
+def _c(code: str) -> str:
+    return code if _tty else ""
+
+
+BOLD   = _c("\033[1m")
+GREEN  = _c("\033[0;32m")
+YELLOW = _c("\033[0;33m")
+CYAN   = _c("\033[0;36m")
+RESET  = _c("\033[0m")
+
+
+def info(msg: str) -> None: print(f"{GREEN}\u2713{RESET} {msg}")
+def warn(msg: str) -> None: print(f"{YELLOW}\u26a0{RESET}  {msg}")
+def step(msg: str) -> None: print(f"{CYAN}\u2192{RESET} {msg}")
+
+
+# ── HTTP helpers ──────────────────────────────────────────────
+
+def _fetch_text(url: str, timeout: int = 10) -> str:
+    req = Request(url, headers={"User-Agent": f"intent-first/{VERSION}"})
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _download(url: str, dest: Path, timeout: int = 30) -> bool:
+    req = Request(url, headers={"User-Agent": f"intent-first/{VERSION}"})
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            dest.write_bytes(resp.read())
+        return True
+    except Exception as exc:
+        warn(f"Download failed: {url} \u2014 {exc}")
+        return False
+
+
+# ── Version check ─────────────────────────────────────────────
+
+def check_latest_version() -> None:
+    now = int(time.time())
+    cached_version, cached_time = "", 0
+    if VERSION_CACHE.exists():
+        try:
+            parts = VERSION_CACHE.read_text().strip().split(":", 1)
+            cached_version = parts[0]
+            cached_time = int(parts[1]) if len(parts) > 1 else 0
+        except Exception:
+            pass
+
+    if (now - cached_time) < VERSION_CHECK_TTL and cached_version:
+        latest = cached_version
+    else:
+        text = _fetch_text(f"https://api.github.com/repos/{REPO}/releases/latest")
+        latest = ""
+        if text:
+            try:
+                latest = json.loads(text).get("tag_name", "")
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        if latest:
+            INTENT_FIRST_HOME.mkdir(parents=True, exist_ok=True)
+            VERSION_CACHE.write_text(f"{latest}:{now}")
+
+    current = f"v{VERSION}"
+    if latest and latest not in (current, VERSION):
+        print(f"{YELLOW}\u26a1 New version available: {latest} (you have {current}){RESET}", file=sys.stderr)
+        print(f"   Run: {BOLD}intent-first upgrade{RESET}", file=sys.stderr)
+        print("", file=sys.stderr)
+
+
+# ── Usage ─────────────────────────────────────────────────────
+
+def usage() -> None:
+    print(f"""\
+intent-first v{VERSION} \u2014 Agentic workflow CLI
 
 Usage:
+  intent-first init [--tool auto|copilot|cursor|claude|windsurf|aider|cline]
+                                    Set up Intent-First in the current project
   intent-first new [name]           Create a workflow (auto-numbered or named)
-  intent-first lock <ID> <STAGE>    Lock a stage (read-only via chmod)
+  intent-first lock <ID> <STAGE>    Lock a stage (read-only via chmod + status.yml)
   intent-first unlock <ID> <STAGE>  Unlock a stage (writable)
   intent-first validate [ID]        Validate workflow(s)
   intent-first list                 List all workflows with status
+  intent-first upgrade              Download and install the latest version
   intent-first implode              Remove all intent-first installed files
   intent-first help                 Show this help
 
-ID: workflow directory name — number or slug (e.g. "1", "add-auth")
+ID: workflow directory name \u2014 number or slug (e.g. "1", "add-auth")
 Stages: intent | spec | plan | execution | artifacts  (or 1-5)
 
+Workflow data: .intent-first/workflows/<ID>/
+Templates:     {TEMPLATE_DIR}
+
 Environment:
-  INTENT_FIRST_TEMPLATE_DIR     Override template directory path
-  WORKFLOW_DIR                  Override workflow directory (default: workflow)
-EOF
+  INTENT_FIRST_HOME             Global data dir (default: ~/.intent-first)
+  INTENT_FIRST_TEMPLATE_DIR     Override template directory
+  INTENT_FIRST_WORKFLOW_DIR     Override workflow directory""")
+
+
+# ── Input validation ──────────────────────────────────────────
+
+_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+
+def validate_workflow_id(wid: str) -> None:
+    if not _ID_RE.match(wid) or ".." in wid:
+        print(f"\u274c Invalid workflow ID: {wid}")
+        print("   Must start with alphanumeric, then alphanumeric/hyphens/underscores.")
+        sys.exit(1)
+
+
+def next_number() -> str:
+    if not WORKFLOW_DIR.is_dir():
+        return "1"
+    max_n = 0
+    for d in WORKFLOW_DIR.iterdir():
+        if d.is_dir() and d.name.isdigit():
+            max_n = max(max_n, int(d.name))
+    return str(max_n + 1)
+
+
+# ── Stage helpers ─────────────────────────────────────────────
+
+_STAGE_FILE: dict[str, str] = {
+    "1": "s1_intent.md",    "intent":    "s1_intent.md",
+    "2": "s2_spec.md",      "spec":      "s2_spec.md",
+    "3": "s3_plan.md",      "plan":      "s3_plan.md",
+    "4": "s4_execution.md", "execution": "s4_execution.md",
+    "5": "s5_artifacts.md", "artifacts": "s5_artifacts.md",
 }
 
-# ── Input validation ───────────────────────────────────────────
-validate_workflow_id() {
-  local id="$1"
-  if [[ ! "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]]; then
-    echo "❌ Invalid workflow ID: $id"
-    echo "   Must start with alphanumeric, then alphanumeric/hyphens/underscores."
-    exit 1
-  fi
-  if [[ "$id" == *".."* ]]; then
-    echo "❌ Invalid workflow ID: $id"
-    exit 1
-  fi
+_STAGE_KEY: dict[str, str] = {
+    "1": "intent",    "intent":    "intent",
+    "2": "spec",      "spec":      "spec",
+    "3": "plan",      "plan":      "plan",
+    "4": "execution", "execution": "execution",
+    "5": "artifacts", "artifacts": "artifacts",
 }
 
-next_number() {
-  if [ ! -d "$WORKFLOW_DIR" ]; then
-    echo "1"
-    return
-  fi
-  local max=0
-  for dir in "$WORKFLOW_DIR"/*/; do
-    [ -d "$dir" ] || continue
-    local name
-    name=$(basename "$dir")
-    if [[ "$name" =~ ^[0-9]+$ ]]; then
-      local num=$((10#$name))
-      [ "$num" -gt "$max" ] && max=$num
-    fi
-  done
-  echo $((max + 1))
+
+def resolve_stage(s: str) -> str:
+    return _STAGE_FILE.get(s, "")
+
+
+def resolve_stage_key(s: str) -> str:
+    return _STAGE_KEY.get(s, "")
+
+
+def get_stage_status(status_file: Path, stage: str) -> str:
+    """Read a stage's status field from status.yml without a YAML parser."""
+    if not status_file.is_file():
+        return ""
+    in_stage = False
+    for line in status_file.read_text().splitlines():
+        if re.match(r"^  [a-z]", line):
+            in_stage = line.strip().startswith(f"{stage}:")
+        if in_stage and re.match(r"^    status:", line):
+            return line.split(":", 1)[1].strip().strip('"').split("#")[0].strip()
+    return ""
+
+
+def update_stage_field(status_file: Path, stage: str, field: str, value: str) -> None:
+    """Update one field in a status.yml stage block. Preserves all comments."""
+    if not status_file.is_file() or not os.access(status_file, os.W_OK):
+        return
+    lines = status_file.read_text().splitlines(keepends=True)
+    in_stage = False
+    for i, line in enumerate(lines):
+        if re.match(r"^  [a-z]", line):
+            in_stage = line.strip().startswith(f"{stage}:")
+        if in_stage and re.match(rf"^    {re.escape(field)}:", line):
+            lines[i] = f'    {field}: "{value}"\n'
+            break
+    fd, tmp = tempfile.mkstemp(dir=status_file.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.writelines(lines)
+        Path(tmp).replace(status_file)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+# ── cmd_new ───────────────────────────────────────────────────
+
+def cmd_new(args: list[str]) -> None:
+    if not TEMPLATE_DIR.is_dir():
+        print(f"\u274c Template directory not found: {TEMPLATE_DIR}")
+        print(f"   Run: curl -fsSL https://raw.githubusercontent.com/{REPO}/main/install.sh | bash")
+        sys.exit(1)
+
+    wid = args[0] if args else next_number()
+    if args:
+        validate_workflow_id(wid)
+
+    target = WORKFLOW_DIR / wid
+    if target.exists():
+        print(f"\u274c Workflow already exists: {target}")
+        sys.exit(1)
+
+    target.mkdir(parents=True)
+
+    for tmpl in STAGE_FILES:
+        src = TEMPLATE_DIR / tmpl
+        if src.is_file():
+            shutil.copy2(src, target / tmpl)
+        else:
+            warn(f"Template not found: {src} (skipped)")
+
+    status_file = target / "status.yml"
+    if status_file.is_file():
+        text = re.sub(
+            r"^workflow_id: .*",
+            f'workflow_id: "{wid}"',
+            status_file.read_text(),
+            count=1,
+            flags=re.MULTILINE,
+        )
+        status_file.write_text(text)
+
+    print(f"\u2705 Created workflow \u2192 {target}/")
+    print()
+    print("Next steps:")
+    print(f"  1. Edit {target}/s1_intent.md with your goals")
+    print(f"  2. Tell your AI agent: /wf-spec {wid}")
+
+
+# ── cmd_lock / cmd_unlock ─────────────────────────────────────
+
+def cmd_lock(args: list[str]) -> None:
+    if len(args) < 2:
+        print("Usage: intent-first lock <ID> <STAGE>")
+        sys.exit(1)
+    wid, stage_input = args[0], args[1]
+    validate_workflow_id(wid)
+
+    stage_file = resolve_stage(stage_input)
+    if not stage_file:
+        print(f"\u274c Unknown stage: {stage_input}")
+        print("   Valid: intent, spec, plan, execution, artifacts (or 1-5)")
+        sys.exit(1)
+
+    target = WORKFLOW_DIR / wid / stage_file
+    if not target.is_file():
+        print(f"\u274c File not found: {target}")
+        sys.exit(1)
+    if target.is_symlink():
+        print(f"\u274c Refusing to lock symlink: {target}")
+        sys.exit(1)
+
+    target.chmod(target.stat().st_mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+    print(f"\U0001f512 Locked {target}")
+
+    stage_key = resolve_stage_key(stage_input)
+    status_file = WORKFLOW_DIR / wid / "status.yml"
+    if status_file.is_file():
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        update_stage_field(status_file, stage_key, "status", "locked")
+        update_stage_field(status_file, stage_key, "locked_at", ts)
+        print(f"   Updated status.yml: {stage_key} \u2192 locked")
+
+
+def cmd_unlock(args: list[str]) -> None:
+    if len(args) < 2:
+        print("Usage: intent-first unlock <ID> <STAGE>")
+        sys.exit(1)
+    wid, stage_input = args[0], args[1]
+    validate_workflow_id(wid)
+
+    stage_file = resolve_stage(stage_input)
+    if not stage_file:
+        print(f"\u274c Unknown stage: {stage_input}")
+        print("   Valid: intent, spec, plan, execution, artifacts (or 1-5)")
+        sys.exit(1)
+
+    target = WORKFLOW_DIR / wid / stage_file
+    if not target.is_file():
+        print(f"\u274c File not found: {target}")
+        sys.exit(1)
+
+    target.chmod(target.stat().st_mode | stat.S_IWUSR)
+    print(f"\U0001f513 Unlocked {target}")
+
+
+# ── cmd_validate ──────────────────────────────────────────────
+
+def _validate_one(directory: Path) -> int:
+    wid = directory.name
+    issues = 0
+    for f in STAGE_FILES:
+        if not (directory / f).is_file():
+            print(f"  \u274c Missing: {directory / f}")
+            issues += 1
+
+    status_file = directory / "status.yml"
+    if status_file.is_file():
+        for stage, fname in [
+            ("spec",      "s2_spec.md"),
+            ("plan",      "s3_plan.md"),
+            ("execution", "s4_execution.md"),
+            ("artifacts", "s5_artifacts.md"),
+        ]:
+            st = get_stage_status(status_file, stage)
+            fpath = directory / fname
+            if not st:
+                print(f"  \u26a0\ufe0f  {status_file}: Missing status for stage '{stage}'")
+                issues += 1
+            elif st == "locked" and fpath.is_file() and os.access(fpath, os.W_OK):
+                print(f"  \u26a0\ufe0f  {fpath}: status.yml says 'locked' but file is writable")
+                print(f"       Fix: intent-first lock {wid} {stage}")
+                issues += 1
+
+    if issues == 0:
+        print(f"  \u2705 {wid}: OK")
+    return issues
+
+
+def cmd_validate(args: list[str]) -> None:
+    target_id = args[0] if args else ""
+    if target_id:
+        validate_workflow_id(target_id)
+
+    errors, checked = 0, 0
+
+    if target_id:
+        d = WORKFLOW_DIR / target_id
+        if not d.is_dir():
+            print(f"\u274c Workflow not found: {d}")
+            sys.exit(1)
+        print(f"Validating {target_id}...")
+        errors = _validate_one(d)
+        checked = 1
+    else:
+        if not WORKFLOW_DIR.is_dir():
+            print("No workflow directory found. Run: intent-first init")
+            return
+        for d in _sorted_workflows():
+            print(f"Validating {d.name}...")
+            errors += _validate_one(d)
+            checked += 1
+
+    print()
+    if checked == 0:
+        print("No workflows found.")
+    elif errors == 0:
+        print(f"\u2705 All {checked} workflow(s) valid.")
+    else:
+        print(f"\u26a0\ufe0f  {errors} issue(s) across {checked} workflow(s).")
+        sys.exit(1)
+
+
+# ── cmd_list ──────────────────────────────────────────────────
+
+def _sorted_workflows() -> list[Path]:
+    """Numeric IDs first (ascending), then slugs alphabetically."""
+    if not WORKFLOW_DIR.is_dir():
+        return []
+    dirs = [d for d in WORKFLOW_DIR.iterdir() if d.is_dir()]
+    return sorted(dirs, key=lambda p: (0, int(p.name)) if p.name.isdigit() else (1, p.name))
+
+
+def cmd_list(_args: list[str]) -> None:
+    if not WORKFLOW_DIR.is_dir():
+        print("No workflows yet. Run: intent-first new")
+        return
+
+    print(f"{'ID':<15} {'TITLE':<30} STATUS")
+    print(f"{'---':<15} {'---':<30} ---")
+
+    for d in _sorted_workflows():
+        wid = d.name
+        title = "(untitled)"
+        intent_file = d / "s1_intent.md"
+        if intent_file.is_file():
+            for line in intent_file.read_text().splitlines():
+                m = re.match(r"^# Intent:\s*(.*)", line)
+                if m:
+                    title = m.group(1).strip()
+                    break
+
+        display_status = "\U0001f4a1 intent"
+        status_file = d / "status.yml"
+        if status_file.is_file():
+            a = get_stage_status(status_file, "artifacts")
+            e = get_stage_status(status_file, "execution")
+            p = get_stage_status(status_file, "plan")
+            s = get_stage_status(status_file, "spec")
+            if   a in ("complete", "locked"):  display_status = "\u2705 complete"
+            elif e == "in_progress":           display_status = "\u2699\ufe0f  executing"
+            elif p in ("locked", "approved"):  display_status = "\U0001f4cb planned"
+            elif s in ("locked", "approved"):  display_status = "\U0001f4d0 specified"
+
+        print(f"{wid:<15} {title[:30]:<30} {display_status}")
+
+
+# ── cmd_init ──────────────────────────────────────────────────
+
+def _init_rules_oneliner(dest: Path, line: str) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_file():
+        if "intent-first" not in dest.read_text().lower():
+            with dest.open("a") as f:
+                f.write(f"\n{line}\n")
+            info(f"Added Intent-First reference \u2192 {dest}")
+        else:
+            info(f"{dest} already references Intent-First (skipped)")
+    else:
+        dest.write_text(f"{line}\n")
+        info(f"Created {dest} with Intent-First reference")
+
+
+_TOOL_FILES: dict[str, Path] = {
+    "copilot":  Path(".github/copilot-instructions.md"),
+    "cursor":   Path(".cursor/rules/intent-first.md"),
+    "claude":   Path("CLAUDE.md"),
+    "windsurf": Path(".windsurfrules"),
+    "aider":    Path(".aider.rules.md"),
+    "cline":    Path(".clinerules"),
 }
 
-# ── Stage helpers ──────────────────────────────────────────────
-STAGE_FILES=("s1_intent.md" "s2_spec.md" "s3_plan.md" "s4_execution.md" "s5_artifacts.md")
 
-resolve_stage() {
-  case "$1" in
-    1|intent)    echo "s1_intent.md" ;;
-    2|spec)      echo "s2_spec.md" ;;
-    3|plan)      echo "s3_plan.md" ;;
-    4|execution) echo "s4_execution.md" ;;
-    5|artifacts) echo "s5_artifacts.md" ;;
-    *)           echo "" ;;
-  esac
-}
+def cmd_init(args: list[str]) -> None:
+    tool = "auto"
+    i = 0
+    while i < len(args):
+        if args[i] == "--tool" and i + 1 < len(args):
+            tool = args[i + 1]; i += 2
+        else:
+            tool = args[i]; i += 1
 
-# ── Commands ───────────────────────────────────────────────────
+    print()
+    print(f"{BOLD}Initializing Intent-First in this project...{RESET}")
+    print()
 
-cmd_new() {
-  if [ ! -d "$TEMPLATE_DIR" ]; then
-    echo "❌ Template directory not found: $TEMPLATE_DIR"
-    echo "   Run install.sh or set INTENT_FIRST_TEMPLATE_DIR"
-    exit 1
-  fi
+    Path(".intent-first").mkdir(exist_ok=True)
 
-  local id="${1:-}"
-  if [ -z "$id" ]; then
-    id=$(next_number)
-  else
-    validate_workflow_id "$id"
-  fi
+    global_rules = INTENT_FIRST_HOME / "rules.md"
+    if global_rules.is_file():
+        shutil.copy2(global_rules, ".intent-first/rules.md")
+        info("Created .intent-first/rules.md")
+    else:
+        warn(f"Global rules not found at {global_rules}")
+        print("  Re-run the installer, then try again:")
+        print(f"    curl -fsSL https://raw.githubusercontent.com/{REPO}/main/install.sh | bash")
+        sys.exit(1)
 
-  local target="$WORKFLOW_DIR/$id"
+    gitignore = Path(".gitignore")
+    marker = ".intent-first/workflows/"
+    if gitignore.is_file():
+        if marker not in gitignore.read_text():
+            with gitignore.open("a") as f:
+                f.write(f"\n# Intent-First workflow data (ephemeral \u2014 do not commit)\n{marker}\n")
+            info("Added .intent-first/workflows/ to .gitignore")
+        else:
+            info(".gitignore already covers .intent-first/workflows/ (skipped)")
+    else:
+        gitignore.write_text(f"# Intent-First workflow data (ephemeral \u2014 do not commit)\n{marker}\n")
+        info("Created .gitignore with .intent-first/workflows/")
 
-  if [ -d "$target" ]; then
-    echo "❌ Workflow already exists: $target"
-    exit 1
-  fi
+    if tool == "auto":
+        tools = []
+        if Path(".github").is_dir() or Path(".github/copilot-instructions.md").is_file():
+            tools.append("copilot")
+        if Path(".cursor").is_dir() or Path(".cursorrules").is_file():
+            tools.append("cursor")
+        if Path("CLAUDE.md").is_file():
+            tools.append("claude")
+        if Path(".windsurfrules").is_file():
+            tools.append("windsurf")
+        if Path(".aider.conf.yml").is_file() or Path(".aiderignore").is_file():
+            tools.append("aider")
+        if Path(".clinerules").is_file() or Path(".cline").is_dir():
+            tools.append("cline")
+        if not tools:
+            tools = ["copilot", "cursor", "claude"]
+    else:
+        tools = [tool]
 
-  mkdir -p "$target"
+    one_liner = "For the Intent-First Agentic Workflow, see `.intent-first/rules.md`."
+    for t in tools:
+        if t in _TOOL_FILES:
+            _init_rules_oneliner(_TOOL_FILES[t], one_liner)
 
-  for tmpl in "${STAGE_FILES[@]}"; do
-    if [ -f "$TEMPLATE_DIR/$tmpl" ]; then
-      cp "$TEMPLATE_DIR/$tmpl" "$target/$tmpl"
-    else
-      echo "⚠️  Template not found: $TEMPLATE_DIR/$tmpl (skipped)"
-    fi
-  done
+    print()
+    print(f"{GREEN}\u2705 Intent-First initialized!{RESET}")
+    print()
+    print("  Commit .intent-first/rules.md \u2014 it's your project-local workflow ruleset.")
+    print("  .intent-first/workflows/ is gitignored \u2014 workflow data stays local.")
+    print()
+    print("  Start your first workflow:")
+    print("    intent-first new")
 
-  echo "✅ Created workflow → $target/"
-  echo ""
-  echo "Next steps:"
-  echo "  1. Edit $target/s1_intent.md with your goals"
-  echo "  2. Tell your AI agent: /wf-spec $id"
-}
 
-cmd_lock() {
-  local id="${1:-}" stage_input="${2:-}"
-  if [ -z "$id" ] || [ -z "$stage_input" ]; then
-    echo "Usage: intent-first lock <ID> <STAGE>"
-    exit 1
-  fi
-  validate_workflow_id "$id"
+# ── cmd_upgrade ───────────────────────────────────────────────
 
-  local stage_file
-  stage_file=$(resolve_stage "$stage_input")
-  if [ -z "$stage_file" ]; then
-    echo "❌ Unknown stage: $stage_input"
-    echo "   Valid: intent, spec, plan, execution, artifacts (or 1-5)"
-    exit 1
-  fi
+def cmd_upgrade(_args: list[str]) -> None:
+    print()
+    print(f"{BOLD}Upgrading Intent-First...{RESET}")
+    print()
 
-  local target="$WORKFLOW_DIR/$id/$stage_file"
-  if [ ! -f "$target" ]; then
-    echo "❌ File not found: $target"
-    exit 1
-  fi
-  if [ -L "$target" ]; then
-    echo "❌ Refusing to lock symlink: $target"
-    exit 1
-  fi
+    text = _fetch_text(f"https://api.github.com/repos/{REPO}/releases/latest")
+    latest = ""
+    if text:
+        try:
+            latest = json.loads(text).get("tag_name", "")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    if not latest:
+        print("\u274c Could not fetch latest version. Check your internet connection.")
+        sys.exit(1)
 
-  chmod a-w "$target"
-  echo "🔒 Locked $target"
-}
+    current = f"v{VERSION}"
+    if latest in (current, VERSION):
+        print(f"\u2705 Already up to date ({current})")
+        return
 
-cmd_unlock() {
-  local id="${1:-}" stage_input="${2:-}"
-  if [ -z "$id" ] || [ -z "$stage_input" ]; then
-    echo "Usage: intent-first unlock <ID> <STAGE>"
-    exit 1
-  fi
-  validate_workflow_id "$id"
+    print(f"  Current: {current}")
+    print(f"  Latest:  {latest}")
+    print()
 
-  local stage_file
-  stage_file=$(resolve_stage "$stage_input")
-  if [ -z "$stage_file" ]; then
-    echo "❌ Unknown stage: $stage_input"
-    echo "   Valid: intent, spec, plan, execution, artifacts (or 1-5)"
-    exit 1
-  fi
+    cli_dest       = INTENT_FIRST_HOME / "bin" / "intent-first"
+    templates_dest = INTENT_FIRST_HOME / "templates"
+    rules_dest     = INTENT_FIRST_HOME / "rules.md"
 
-  local target="$WORKFLOW_DIR/$id/$stage_file"
-  if [ ! -f "$target" ]; then
-    echo "❌ File not found: $target"
-    exit 1
-  fi
+    if templates_dest.is_dir():
+        bk = templates_dest.parent / "templates.bk"
+        if bk.exists():
+            shutil.rmtree(bk)
+        shutil.copytree(templates_dest, bk)
+        info("Backed up templates \u2192 templates.bk")
 
-  chmod u+w "$target"
-  echo "🔓 Unlocked $target"
-}
+    step("Downloading CLI...")
+    bin_dir = INTENT_FIRST_HOME / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=bin_dir)
+    os.close(fd)
+    tmp_path = Path(tmp)
+    if not _download(f"{RAW}/cli/intent-first", tmp_path):
+        print("\u274c Failed to download new CLI")
+        tmp_path.unlink()
+        sys.exit(1)
+    tmp_path.chmod(tmp_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    tmp_path.replace(cli_dest)
+    info(f"CLI upgraded \u2192 {cli_dest}")
 
-cmd_validate() {
-  local target_id="${1:-}"
-  [ -n "$target_id" ] && validate_workflow_id "$target_id"
-  local errors=0
-  local checked=0
+    step("Downloading templates...")
+    templates_dest.mkdir(parents=True, exist_ok=True)
+    for tmpl in STAGE_FILES:
+        fd, tmp = tempfile.mkstemp(dir=templates_dest)
+        os.close(fd)
+        tmp_path = Path(tmp)
+        if _download(f"{RAW}/templates/{tmpl}", tmp_path):
+            tmp_path.replace(templates_dest / tmpl)
+            info(f"Template: {tmpl}")
+        else:
+            tmp_path.unlink()
 
-  validate_one() {
-    local dir="$1"
-    local id
-    id=$(basename "$dir")
-    local issues=0
+    step("Downloading rules...")
+    fd, tmp = tempfile.mkstemp(dir=INTENT_FIRST_HOME)
+    os.close(fd)
+    tmp_path = Path(tmp)
+    if _download(f"{RAW}/rules/RULES.md", tmp_path):
+        tmp_path.replace(rules_dest)
+        info(f"Rules updated \u2192 {rules_dest}")
+    else:
+        tmp_path.unlink()
 
-    for f in "${STAGE_FILES[@]}"; do
-      if [ ! -f "$dir/$f" ]; then
-        echo "  ❌ Missing: $dir/$f"
-        issues=$((issues + 1))
-      fi
-    done
+    VERSION_CACHE.write_text(f"{latest}:{int(time.time())}")
+    print()
+    print(f"{GREEN}\u2705 Upgraded to {latest}{RESET}")
+    print()
+    print("  Per-project .intent-first/rules.md files are NOT auto-updated.")
+    print("  Run 'intent-first init' in each project to refresh local rules.")
 
-    if [ -f "$dir/s1_intent.md" ]; then
-      if ! grep -q "^# Intent:" "$dir/s1_intent.md"; then
-        echo "  ⚠️  $dir/s1_intent.md: Missing '# Intent:' title"
-        issues=$((issues + 1))
-      fi
-    fi
 
-    if [ -f "$dir/s2_spec.md" ]; then
-      for field in "Status:" "Decision Maker:" "Human Approval:"; do
-        if ! grep -q "$field" "$dir/s2_spec.md"; then
-          echo "  ⚠️  $dir/s2_spec.md: Missing '$field'"
-          issues=$((issues + 1))
-        fi
-      done
-      if grep -q "Approved.*Locked" "$dir/s2_spec.md" 2>/dev/null && [ -w "$dir/s2_spec.md" ]; then
-        echo "  ⚠️  $dir/s2_spec.md: Marked locked but writable (run: intent-first lock $id spec)"
-        issues=$((issues + 1))
-      fi
-    fi
+# ── cmd_implode ───────────────────────────────────────────────
 
-    if [ -f "$dir/s3_plan.md" ]; then
-      for field in "Status:" "Derived From:"; do
-        if ! grep -q "$field" "$dir/s3_plan.md"; then
-          echo "  ⚠️  $dir/s3_plan.md: Missing '$field'"
-          issues=$((issues + 1))
-        fi
-      done
-      if grep -q "Approved.*Locked" "$dir/s3_plan.md" 2>/dev/null && [ -w "$dir/s3_plan.md" ]; then
-        echo "  ⚠️  $dir/s3_plan.md: Marked locked but writable (run: intent-first lock $id plan)"
-        issues=$((issues + 1))
-      fi
-    fi
+def _is_rules_only_intent_first(path: Path) -> bool:
+    """True if file contains only an Intent-First reference (safe to delete)."""
+    if path.is_symlink():
+        return False
+    try:
+        text = path.read_text()
+    except OSError:
+        return False
+    non_empty = [
+        line for line in text.splitlines()
+        if line.strip() and not line.strip().startswith(("#", "<!--", "-->", ">"))
+    ]
+    if not non_empty:
+        return True
+    if_lines = [line for line in non_empty if "intent-first" in line.lower()]
+    return len(if_lines) >= len(non_empty)
 
-    if [ "$issues" -eq 0 ]; then
-      echo "  ✅ $id: OK"
-    fi
-    return $issues
-  }
 
-  if [ -n "$target_id" ]; then
-    local dir="$WORKFLOW_DIR/$target_id"
-    if [ ! -d "$dir" ]; then
-      echo "❌ Workflow not found: $dir"
-      exit 1
-    fi
-    echo "Validating $target_id..."
-    validate_one "$dir" || errors=$((errors + $?))
-    checked=1
-  else
-    if [ ! -d "$WORKFLOW_DIR" ]; then
-      echo "No workflow directory found."
-      exit 0
-    fi
-    for dir in "$WORKFLOW_DIR"/*/; do
-      [ -d "$dir" ] || continue
-      echo "Validating $(basename "$dir")..."
-      validate_one "$dir" || errors=$((errors + $?))
-      checked=$((checked + 1))
-    done
-  fi
+def cmd_implode(_args: list[str]) -> None:
+    print()
+    print(f"{BOLD}\u26a0\ufe0f  Intent-First Implode{RESET}")
+    print()
+    print("Removes all intent-first installed files. Workflow data is kept.")
+    print()
+    try:
+        confirm = input("Type 'implode' to confirm: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted.")
+        return
+    if confirm != "implode":
+        print("Aborted.")
+        return
+    print()
 
-  echo ""
-  if [ "$checked" -eq 0 ]; then
-    echo "No workflows found."
-  elif [ "$errors" -eq 0 ]; then
-    echo "✅ All $checked workflow(s) valid."
-  else
-    echo "⚠️  $errors issue(s) across $checked workflow(s)."
-    exit 1
-  fi
-}
+    unsafe_files: list[Path] = []
+    removed = 0
 
-cmd_list() {
-  if [ ! -d "$WORKFLOW_DIR" ]; then
-    echo "No workflows yet. Run: intent-first new"
-    exit 0
-  fi
+    for prompt_dir_str in TOOL_PROMPT_DIRS:
+        prompt_dir = Path(prompt_dir_str)
+        if not prompt_dir.is_dir():
+            continue
+        for prompt in INTENT_FIRST_PROMPTS:
+            target = prompt_dir / prompt
+            if target.is_symlink():
+                print(f"  \u26a0\ufe0f  SKIPPED {target} (symlink)")
+            elif target.is_file():
+                target.unlink()
+                print(f"  \u2713 Removed {target}")
+                removed += 1
+        try:
+            prompt_dir.rmdir()
+            print(f"  \u2713 Removed empty {prompt_dir}/")
+        except OSError:
+            pass
 
-  printf "%-15s %-30s %-15s\n" "ID" "TITLE" "STATUS"
-  printf "%-15s %-30s %-15s\n" "---" "---" "---"
+    for rules_str in TOOL_RULES:
+        rules_file = Path(rules_str)
+        if not rules_file.is_file():
+            continue
+        if _is_rules_only_intent_first(rules_file):
+            rules_file.unlink()
+            print(f"  \u2713 Removed {rules_file}")
+            removed += 1
+            parent = rules_file.parent
+            if parent != Path("."):
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
+        else:
+            unsafe_files.append(rules_file)
+            print(f"  \u26a0\ufe0f  SKIPPED {rules_file} (has other content)")
 
-  for dir in "$WORKFLOW_DIR"/*/; do
-    [ -d "$dir" ] || continue
-    local id
-    id=$(basename "$dir")
-    local title="(untitled)"
-    local status="💡 intent"
+    local_rules = Path(".intent-first/rules.md")
+    if local_rules.is_file():
+        local_rules.unlink()
+        print(f"  \u2713 Removed {local_rules}")
+        removed += 1
 
-    if [ -f "$dir/s1_intent.md" ]; then
-      local t
-      t=$(grep "^# Intent:" "$dir/s1_intent.md" | sed 's/^# Intent: *//' | head -1)
-      [ -n "$t" ] && title="$t"
-    fi
+    global_cli = INTENT_FIRST_HOME / "bin" / "intent-first"
+    if global_cli.is_file():
+        global_cli.unlink()
+        print(f"  \u2713 Removed {global_cli}")
+        removed += 1
+        try:
+            (INTENT_FIRST_HOME / "bin").rmdir()
+        except OSError:
+            pass
 
-    if [ -f "$dir/s5_artifacts.md" ] && grep -q "^\*\*Status:\*\* Complete$" "$dir/s5_artifacts.md" 2>/dev/null; then
-      status="✅ complete"
-    elif [ -f "$dir/s4_execution.md" ] && grep -q "^\*\*Status:\*\* In Progress$" "$dir/s4_execution.md" 2>/dev/null; then
-      status="⚙️  executing"
-    elif [ -f "$dir/s3_plan.md" ] && grep -q "Approved.*Locked" "$dir/s3_plan.md" 2>/dev/null; then
-      status="📋 planned"
-    elif [ -f "$dir/s2_spec.md" ] && grep -q "Approved.*Locked" "$dir/s2_spec.md" 2>/dev/null; then
-      status="📐 specified"
-    fi
+    try:
+        Path(".intent-first").rmdir()
+        print("  \u2713 Removed .intent-first/")
+    except OSError:
+        pass
 
-    printf "%-15s %-30s %-15s\n" "$id" "${title:0:30}" "$status"
-  done
-}
+    print()
+    print(f"\u2705 Removed {removed} item(s).")
 
-# ── Implode ────────────────────────────────────────────────────
-INTENT_FIRST_MARKER="Intent-First"
+    if unsafe_files:
+        print()
+        print(f"{YELLOW}Files with mixed content (not deleted):{RESET}")
+        for f in unsafe_files:
+            print(f"   {f} \u2014 manually remove the Intent-First reference line")
 
-TOOL_RULES=(
-  ".github/copilot-instructions.md"
-  ".cursor/rules/intent-first.md"
-  "CLAUDE.md"
-  ".windsurfrules"
-  ".aider.rules.md"
-  ".clinerules"
-  ".antigravity/rules/intent-first.md"
-)
 
-TOOL_PROMPT_DIRS=(
-  ".github/prompts"
-  ".cursor/prompts"
-  ".claude/prompts"
-  ".windsurf/prompts"
-  ".antigravity/prompts"
-)
+# ── Main ──────────────────────────────────────────────────────
 
-INTENT_FIRST_PROMPTS=(
-  "wf-spec.prompt.md"
-  "wf-plan.prompt.md"
-  "wf-execution.prompt.md"
-  "wf-artifacts.prompt.md"
-  "wf-yolo.prompt.md"
-)
+def main() -> None:
+    args = sys.argv[1:]
+    cmd  = args[0] if args else "help"
 
-check_rules_modified() {
-  local file="$1"
-  [ ! -f "$file" ] && return 1
-  [ -L "$file" ] && return 0
+    if cmd not in ("upgrade", "help", "--help", "-h", "implode"):
+        check_latest_version()
 
-  local marker_count
-  marker_count=$(grep -c "$INTENT_FIRST_MARKER" "$file" 2>/dev/null || echo "0")
-  [ "$marker_count" -eq 0 ] && return 0
+    dispatch = {
+        "init":     lambda: cmd_init(args[1:]),
+        "new":      lambda: cmd_new(args[1:]),
+        "lock":     lambda: cmd_lock(args[1:]),
+        "unlock":   lambda: cmd_unlock(args[1:]),
+        "validate": lambda: cmd_validate(args[1:]),
+        "list":     lambda: cmd_list(args[1:]),
+        "upgrade":  lambda: cmd_upgrade(args[1:]),
+        "implode":  lambda: cmd_implode(args[1:]),
+        "help":     usage,
+        "--help":   usage,
+        "-h":       usage,
+    }
 
-  local non_if_lines total_non_empty
-  non_if_lines=$(grep -v "$INTENT_FIRST_MARKER" "$file" | grep -v "^$" | grep -v "^#" | grep -v "^<!--" | grep -v "^-->" | grep -v "^>" | wc -l | tr -d ' ')
-  total_non_empty=$(grep -v "^$" "$file" | wc -l | tr -d ' ')
+    fn = dispatch.get(cmd)
+    if fn is None:
+        print(f"Unknown command: {cmd}")
+        usage()
+        sys.exit(1)
+    fn()
 
-  [ "$total_non_empty" -gt 0 ] && [ "$non_if_lines" -gt "$((total_non_empty / 2))" ] && return 0
-  return 1
-}
 
-cmd_implode() {
-  echo ""
-  echo -e "${BOLD:-}⚠️  Intent-First Implode${RESET:-}"
-  echo ""
-  echo "Removes all intent-first installed files. Workflow data is kept."
-  echo ""
-  printf "Type 'implode' to confirm: "
-  read -r confirm
-  [ "$confirm" != "implode" ] && echo "Aborted." && exit 0
-  echo ""
-
-  local unsafe_files=()
-  local removed=0
-
-  for dir in "${TOOL_PROMPT_DIRS[@]}"; do
-    if [ -d "$dir" ]; then
-      for prompt in "${INTENT_FIRST_PROMPTS[@]}"; do
-        local target="$dir/$prompt"
-        if [ -L "$target" ]; then
-          echo "  ⚠️  SKIPPED $target (symlink)"
-        elif [ -f "$target" ]; then
-          rm "$target"
-          echo "  ✓ Removed $target"
-          removed=$((removed + 1))
-        fi
-      done
-      [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ] && rmdir "$dir" && echo "  ✓ Removed empty $dir/"
-    fi
-  done
-
-  for rules_file in "${TOOL_RULES[@]}"; do
-    if [ -f "$rules_file" ]; then
-      if check_rules_modified "$rules_file"; then
-        unsafe_files+=("$rules_file")
-        echo "  ⚠️  SKIPPED $rules_file (has other content)"
-      else
-        rm "$rules_file"
-        echo "  ✓ Removed $rules_file"
-        removed=$((removed + 1))
-        local parent
-        parent=$(dirname "$rules_file")
-        [ -d "$parent" ] && [ "$parent" != "." ] && [ -z "$(ls -A "$parent" 2>/dev/null)" ] && rmdir "$parent"
-      fi
-    fi
-  done
-
-  [ -d ".intent-first/templates" ] && [ ! -L ".intent-first/templates" ] && rm -r ".intent-first/templates" && echo "  ✓ Removed .intent-first/templates/" && removed=$((removed + 1))
-  [ -f ".intent-first/bin/intent-first" ] && [ ! -L ".intent-first/bin/intent-first" ] && rm ".intent-first/bin/intent-first" && echo "  ✓ Removed .intent-first/bin/intent-first" && removed=$((removed + 1))
-  [ -d ".intent-first/bin" ] && [ -z "$(ls -A ".intent-first/bin" 2>/dev/null)" ] && rmdir ".intent-first/bin"
-
-  local global_cli="$HOME/.intent_first/bin/intent-first"
-  if [ -f "$global_cli" ]; then
-    rm "$global_cli"
-    echo "  ✓ Removed $global_cli"
-    removed=$((removed + 1))
-    [ -d "$HOME/.intent_first/bin" ] && [ -z "$(ls -A "$HOME/.intent_first/bin" 2>/dev/null)" ] && rmdir "$HOME/.intent_first/bin"
-    [ -d "$HOME/.intent_first" ] && [ -z "$(ls -A "$HOME/.intent_first" 2>/dev/null)" ] && rmdir "$HOME/.intent_first"
-  fi
-
-  [ -d ".intent-first" ] && [ -z "$(ls -A ".intent-first" 2>/dev/null)" ] && rmdir ".intent-first" && echo "  ✓ Removed .intent-first/"
-
-  echo ""
-  echo "✅ Removed $removed item(s)."
-
-  if [ ${#unsafe_files[@]} -gt 0 ]; then
-    echo ""
-    echo -e "${YELLOW:-}Files with mixed content (not deleted):${RESET:-}"
-    for f in "${unsafe_files[@]}"; do
-      echo "   $f — manually remove the Intent-First section"
-    done
-  fi
-}
-
-# ── Main ───────────────────────────────────────────────────────
-case "${1:-help}" in
-  new)        cmd_new "${2:-}" ;;
-  lock)       cmd_lock "${2:-}" "${3:-}" ;;
-  unlock)     cmd_unlock "${2:-}" "${3:-}" ;;
-  validate)   cmd_validate "${2:-}" ;;
-  list)       cmd_list ;;
-  implode)    cmd_implode ;;
-  help|--help|-h) usage ;;
-  *)          echo "Unknown command: $1"; usage; exit 1 ;;
-esac
+if __name__ == "__main__":
+    main()
