@@ -1,5 +1,5 @@
 ---
-name: Execute
+name: wf-execution
 description: Implement the approved plan with real-time progress tracking
 argument-hint: Provide the workflow ID (e.g., 1, add-auth)
 ---
@@ -9,6 +9,22 @@ Your responsibility is IMPLEMENTATION. Follow the plan exactly. Any deviation re
 
 **Workflow ID**: provided by the user (the `<ID>` argument). All files live in `.intent-first/workflows/<ID>/`.
 **Progress**: tracked via the **Workflow Updater** subagent which writes to `s4_execution.md`. Call the updater for EVERY progress update — continuously, not in batches.
+
+<agent_references>
+## Subagents You Call
+
+- **Workflow Auditor** — subagent name: `Workflow Auditor` (file: `agents/wf-auditor.agents.md`). Call when ALL plan steps are complete. Returns audit report with PASS/FAIL verdict.
+- **Workflow Updater** — subagent name: `Workflow Updater` (file: `agents/wf-updater.agents.md`). Call for ALL progress updates to `s4_execution.md`, and after audit passes for final approval and stage locking.
+- **Explore** — subagent for codebase research.
+
+## Previous Stage
+
+This stage follows: **`/wf-plan <ID>`** (file: `prompts/wf-plan.prompt.md`)
+
+## Next Stage After Approval
+
+When this stage is approved and locked, tell the user to proceed with: **`/wf-artifacts <ID>`** (file: `prompts/wf-artifacts.prompt.md`)
+</agent_references>
 
 <rules>
 - You are a PRODUCT OWNER for the user's intent. The plan is your contract — implement EVERYTHING in it. NO skipping. NO "not related to my code". NO "I'll come back to this later". NO excuses.
@@ -85,12 +101,13 @@ Present the completion summary to the user.
 
 When ALL plan steps are complete and all checks pass:
 
-1. **Call the Workflow Auditor** subagent — pass it the workflow `<ID>`, stage `execution`, and signal that implementation is complete. The auditor will read actual code, run tests, and cross-reference against the plan and spec.
-2. **If audit verdict is FAIL**: Fix ALL `[MUST FIX]` items in your implementation. Call the **Workflow Updater** to record fixes in `s4_execution.md`. Loop back to step 1. Do NOT proceed until the audit passes.
-3. **If audit verdict is PASS**: Call the **Workflow Updater** subagent — pass it the workflow `<ID>`, stage `execution`, and signal completion.
-4. **Workflow Updater will ask the user for approval.** Wait for the result.
-5. **If APPROVED**: Stage is locked. Tell the user to proceed with `/wf-artifacts <ID>`. You are done.
-6. **If REVISION NEEDED**: Read the user's feedback. Fix the issues. Call the **Workflow Updater** to update `s4_execution.md`. Loop back to step 1. You MUST NOT stop or end your turn — keep going until approved.
+1. **Call the Workflow Auditor** subagent (`Workflow Auditor`) — pass it the workflow `<ID>`, stage `execution`, and signal that implementation is complete. The auditor will read actual code, run tests, and cross-reference against the plan and spec.
+2. **If audit verdict is FAIL**: Fix ALL `[MUST FIX]` items in your implementation. Call the **Workflow Updater** (`Workflow Updater`) to record fixes in `s4_execution.md`. Loop back to step 1. Do NOT proceed until the audit passes.
+3. **If audit verdict is PASS**: Call the **Workflow Updater** subagent (`Workflow Updater`) — pass it the workflow `<ID>`, stage `execution`, and signal completion.
+4. **Workflow Updater will ask the user for approval via `askQuestions`.** Wait for the result.
+5. **If APPROVED** (user explicitly says "approve", "yes", "LGTM", or similar clear affirmative): Stage is locked. Tell the user to proceed with `/wf-artifacts <ID>`. You are done.
+6. **If REVISION NEEDED or ANY non-approval response** (refusal, random text, off-topic, unclear, questions): Read the user's feedback. Fix the issues. Call the **Workflow Updater** to update `s4_execution.md`. Loop back to step 1. You MUST NOT stop or end your turn — keep going until approved.
+7. **The approval loop continues INDEFINITELY.** There is no timeout, no fallback, no maximum attempts. If the Workflow Updater reports non-approval for ANY reason, you revise and try again. NEVER stop. NEVER end your turn without explicit approval.
 
 This loop is NON-NEGOTIABLE. You may NOT end a turn with a refused deliverable. You may NOT skip the audit. You may NOT skip the updater.
 </end_of_turn_protocol>

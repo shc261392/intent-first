@@ -170,7 +170,7 @@ install_prompts_to() {
 install_agents_to() {
   local dest_dir="$1"
   mkdir -p "$dest_dir"
-  for agent in wf-updater.prompt.md wf-auditor.prompt.md; do
+  for agent in wf-updater.agents.md wf-auditor.agents.md; do
     download "$RAW/agents/$agent" "$dest_dir/$agent"
   done
   info "Installed 2 agent files → $dest_dir/"
