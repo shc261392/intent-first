@@ -844,11 +844,10 @@ def cmd_upgrade(_args: list[str]) -> None:
             if (prompt_dir and Path(prompt_dir).is_dir()) or \
                (agent_dir and Path(agent_dir).is_dir()):
                 upgrade_tools.append(t)
-    if upgrade_tools:
-        _install_prompts_and_agents(list(dict.fromkeys(upgrade_tools)))
-    else:
-        warn("No tool directories found in current directory — skipping prompt/agent refresh.")
-        warn("Run 'intent-first init' inside your project to install them.")
+    # If still no tools detected, default to at least copilot (⇒ .github/)
+    if not upgrade_tools:
+        upgrade_tools = ["copilot"]
+    _install_prompts_and_agents(list(dict.fromkeys(upgrade_tools)))
 
     if latest not in (current, VERSION):
         VERSION_CACHE.write_text(f"{latest}:{int(time.time())}")
