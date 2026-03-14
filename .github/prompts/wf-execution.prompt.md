@@ -1,5 +1,5 @@
 ---
-name: Execute
+name: wf-execution
 description: Implement the approved plan with real-time progress tracking
 argument-hint: Provide the workflow ID (e.g., 1, add-auth)
 ---

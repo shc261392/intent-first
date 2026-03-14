@@ -1,5 +1,5 @@
 ---
-name: Artifacts
+name: wf-artifacts
 description: Document final outcomes, capture lessons learned, and close the workflow
 argument-hint: Provide the workflow ID (e.g., 1, add-auth)
 model: ['Claude Haiku 4.5 (copilot)', 'Gemini 3 Flash (Preview) (copilot)']

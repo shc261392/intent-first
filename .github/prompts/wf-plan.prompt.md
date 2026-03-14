@@ -1,5 +1,5 @@
 ---
-name: Plan
+name: wf-plan
 description: Research and create a detailed implementation plan from an approved specification
 argument-hint: Provide the workflow ID (e.g., 1, add-auth)
 tools: ['search', 'read', 'web', 'vscode/memory', 'github/issue_read', 'execute/getTerminalOutput', 'execute/testFailure', 'agent', 'vscode/askQuestions']

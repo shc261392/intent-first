@@ -1,5 +1,5 @@
 ---
-name: YOLO
+name: wf-yolo
 description: Run the full Intent-First workflow with auto-approval at high confidence
 argument-hint: Provide workflow ID, optionally followed by inline intent
 ---

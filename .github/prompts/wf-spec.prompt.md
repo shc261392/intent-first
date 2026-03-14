@@ -1,5 +1,5 @@
 ---
-name: Spec
+name: wf-spec
 description: Research and draft a technical specification from human-written intent
 argument-hint: Provide the workflow ID (e.g., 1, add-auth)
 tools: ['search', 'read', 'web', 'vscode/memory', 'github/issue_read', 'execute/getTerminalOutput', 'execute/testFailure', 'agent', 'vscode/askQuestions']

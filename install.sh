@@ -262,25 +262,67 @@ install_cli() {
   fi
 
   mkdir -p "$global_dir"
-  download "$RAW/cli/intent-first" "$dest"
-  chmod +x "$dest"
-  info "Installed CLI → $dest"
+
+  # Fetch latest version tag to decide whether to (re)download the CLI
+  local latest_tag=""
+  if command -v curl &>/dev/null; then
+    latest_tag=$(curl -fsSL --proto '=https' "https://api.github.com/repos/$REPO/releases/latest" \
+      2>/dev/null | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+  fi
+
+  local current_version=""
+  if [ -x "$dest" ]; then
+    current_version=$(python3 "$dest" --help 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)
+  fi
+
+  if [ -n "$latest_tag" ] && [ -n "$current_version" ] && [ "$latest_tag" = "$current_version" ]; then
+    info "CLI already up to date ($current_version) — skipping download"
+  else
+    download "$RAW/cli/intent-first" "$dest"
+    chmod +x "$dest"
+    info "Installed CLI → $dest"
+  fi
   echo ""
 
   shell_name=$(detect_shell)
   profile_path=$(get_shell_profile "$shell_name")
   export_line="export PATH=\"\$HOME/.intent-first/bin:\$PATH\""
 
-  if ! path_contains "$global_dir"; then
-    echo "  ${BOLD}Add to PATH:${RESET}"
-    echo "    ${GREEN}${profile_path}${RESET}"
-    echo ""
-    echo "  ${CYAN}Copy & paste:${RESET}"
-    echo "    echo '$export_line' >> $profile_path"
-    echo "    source $profile_path"
-  else
+  if path_contains "$global_dir"; then
     info "$global_dir already in PATH"
+    return
   fi
+
+  # Check if profile already has the line (covers already-set-but-not-active sessions)
+  if [ -f "$profile_path" ] && grep -qF '.intent-first/bin' "$profile_path" 2>/dev/null; then
+    warn "PATH entry already in $profile_path — open a new terminal or run: source $profile_path"
+    return
+  fi
+
+  echo ""
+  echo "  ${BOLD}Add $global_dir to PATH?${RESET}"
+  echo "  This appends one line to: ${GREEN}${profile_path}${RESET}"
+  echo ""
+  printf "  Append to %s? [Y/n] " "$profile_path"
+
+  # Read from /dev/tty so it works even when script is piped through curl | bash
+  if [ -t 0 ]; then
+    read -r reply
+  else
+    read -r reply < /dev/tty
+  fi
+
+  case "${reply:-Y}" in
+    [Yy]|"")
+      printf '\n# Intent-First CLI\n%s\n' "$export_line" >> "$profile_path"
+      info "Appended PATH entry → $profile_path"
+      echo "  Run: ${CYAN}source $profile_path${RESET}"
+      ;;
+    *)
+      warn "Skipped. Add manually:"
+      echo "    echo '$export_line' >> $profile_path"
+      ;;
+  esac
 }
 
 # ── Main ───────────────────────────────────────────────────────

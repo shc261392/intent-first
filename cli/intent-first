@@ -50,6 +50,14 @@ TOOL_PROMPT_DIRS = [
     ".antigravity/prompts",
 ]
 
+TOOL_AGENT_DIRS = [
+    ".github/agents",
+    ".cursor/agents",
+    ".claude/agents",
+    ".windsurf/agents",
+    ".antigravity/agents",
+]
+
 INTENT_FIRST_PROMPTS = [
     "wf-spec.prompt.md",
     "wf-plan.prompt.md",
@@ -57,6 +65,22 @@ INTENT_FIRST_PROMPTS = [
     "wf-artifacts.prompt.md",
     "wf-yolo.prompt.md",
 ]
+
+INTENT_FIRST_AGENTS = [
+    "wf-updater.prompt.md",
+    "wf-auditor.prompt.md",
+]
+
+# Map tool name (as detected by init/upgrade) → (prompt_dir, agent_dir)
+_TOOL_DIRS: dict[str, tuple[str, str | None]] = {
+    "copilot":     (".github/prompts",       ".github/agents"),
+    "cursor":      (".cursor/prompts",        ".cursor/agents"),
+    "claude":      (".claude/prompts",        ".claude/agents"),
+    "windsurf":    (".windsurf/prompts",      ".windsurf/agents"),
+    "aider":       (None,                     None),
+    "cline":       (None,                     None),
+    "antigravity": (".antigravity/prompts",   ".antigravity/agents"),
+}
 
 # ── Colors ────────────────────────────────────────────────────
 
@@ -249,6 +273,63 @@ def update_stage_field(status_file: Path, stage: str, field: str, value: str) ->
             os.unlink(tmp)
         except OSError:
             pass
+
+
+# ── Prompt / agent installer ─────────────────────────────────
+
+def _install_prompts_and_agents(tools: list[str]) -> None:
+    """Download latest prompts and agent files into all detected tool directories."""
+    installed_prompt_dirs: list[Path] = []
+    installed_agent_dirs:  list[Path] = []
+
+    for t in tools:
+        dirs = _TOOL_DIRS.get(t)
+        if not dirs:
+            continue
+        prompt_dir_str, agent_dir_str = dirs
+        if prompt_dir_str:
+            pd = Path(prompt_dir_str)
+            pd.mkdir(parents=True, exist_ok=True)
+            for fname in INTENT_FIRST_PROMPTS:
+                tmp_path = None
+                try:
+                    fd, tmp = tempfile.mkstemp(dir=pd)
+                    os.close(fd)
+                    tmp_path = Path(tmp)
+                    if _download(f"{RAW}/prompts/{fname}", tmp_path):
+                        tmp_path.replace(pd / fname)
+                        tmp_path = None
+                except Exception as exc:
+                    warn(f"Failed to install prompt {fname}: {exc}")
+                finally:
+                    if tmp_path and tmp_path.exists():
+                        tmp_path.unlink()
+            if pd not in installed_prompt_dirs:
+                installed_prompt_dirs.append(pd)
+        if agent_dir_str:
+            ad = Path(agent_dir_str)
+            ad.mkdir(parents=True, exist_ok=True)
+            for fname in INTENT_FIRST_AGENTS:
+                tmp_path = None
+                try:
+                    fd, tmp = tempfile.mkstemp(dir=ad)
+                    os.close(fd)
+                    tmp_path = Path(tmp)
+                    if _download(f"{RAW}/agents/{fname}", tmp_path):
+                        tmp_path.replace(ad / fname)
+                        tmp_path = None
+                except Exception as exc:
+                    warn(f"Failed to install agent {fname}: {exc}")
+                finally:
+                    if tmp_path and tmp_path.exists():
+                        tmp_path.unlink()
+            if ad not in installed_agent_dirs:
+                installed_agent_dirs.append(ad)
+
+    for pd in installed_prompt_dirs:
+        info(f"Installed {len(INTENT_FIRST_PROMPTS)} prompts → {pd}/")
+    for ad in installed_agent_dirs:
+        info(f"Installed {len(INTENT_FIRST_AGENTS)} agents → {ad}/")
 
 
 # ── cmd_new ───────────────────────────────────────────────────
@@ -551,6 +632,9 @@ def cmd_init(args: list[str]) -> None:
         if t in _TOOL_FILES:
             _init_rules_oneliner(_TOOL_FILES[t], one_liner)
 
+    step("Installing prompts and agents...")
+    _install_prompts_and_agents(tools)
+
     print()
     print(f"{GREEN}\u2705 Intent-First initialized!{RESET}")
     print()
@@ -581,12 +665,11 @@ def cmd_upgrade(_args: list[str]) -> None:
 
     current = f"v{VERSION}"
     if latest in (current, VERSION):
-        print(f"\u2705 Already up to date ({current})")
-        return
-
-    print(f"  Current: {current}")
-    print(f"  Latest:  {latest}")
-    print()
+        print(f"\u2705 CLI already up to date ({current}) — refreshing prompts, agents, and templates...")
+    else:
+        print(f"  Current: {current}")
+        print(f"  Latest:  {latest}")
+        print()
 
     cli_dest       = INTENT_FIRST_HOME / "bin" / "intent-first"
     templates_dest = INTENT_FIRST_HOME / "templates"
@@ -599,19 +682,20 @@ def cmd_upgrade(_args: list[str]) -> None:
         shutil.copytree(templates_dest, bk)
         info("Backed up templates \u2192 templates.bk")
 
-    step("Downloading CLI...")
-    bin_dir = INTENT_FIRST_HOME / "bin"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=bin_dir)
-    os.close(fd)
-    tmp_path = Path(tmp)
-    if not _download(f"{RAW}/cli/intent-first", tmp_path):
-        print("\u274c Failed to download new CLI")
-        tmp_path.unlink()
-        sys.exit(1)
-    tmp_path.chmod(tmp_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    tmp_path.replace(cli_dest)
-    info(f"CLI upgraded \u2192 {cli_dest}")
+    if latest not in (current, VERSION):
+        step("Downloading CLI...")
+        bin_dir = INTENT_FIRST_HOME / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=bin_dir)
+        os.close(fd)
+        tmp_path = Path(tmp)
+        if not _download(f"{RAW}/cli/intent-first", tmp_path):
+            print("\u274c Failed to download new CLI")
+            tmp_path.unlink()
+            sys.exit(1)
+        tmp_path.chmod(tmp_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        tmp_path.replace(cli_dest)
+        info(f"CLI upgraded \u2192 {cli_dest}")
 
     step("Downloading templates...")
     templates_dest.mkdir(parents=True, exist_ok=True)
@@ -635,9 +719,35 @@ def cmd_upgrade(_args: list[str]) -> None:
     else:
         tmp_path.unlink()
 
-    VERSION_CACHE.write_text(f"{latest}:{int(time.time())}")
-    print()
-    print(f"{GREEN}\u2705 Upgraded to {latest}{RESET}")
+    step("Refreshing prompts and agents in detected tool directories...")
+    # Detect which tools are present in the current directory (if any)
+    upgrade_tools: list[str] = []
+    for t, dirs in _TOOL_DIRS.items():
+        prompt_dir, agent_dir = dirs
+        if prompt_dir and Path(prompt_dir).is_dir():
+            upgrade_tools.append(t)
+        elif agent_dir and Path(agent_dir).is_dir():
+            upgrade_tools.append(t)
+    # Fallback: refresh all dirs that already exist globally
+    if not upgrade_tools:
+        for t, dirs in _TOOL_DIRS.items():
+            prompt_dir, agent_dir = dirs
+            if (prompt_dir and Path(prompt_dir).is_dir()) or \
+               (agent_dir and Path(agent_dir).is_dir()):
+                upgrade_tools.append(t)
+    if upgrade_tools:
+        _install_prompts_and_agents(list(dict.fromkeys(upgrade_tools)))
+    else:
+        warn("No tool directories found in current directory — skipping prompt/agent refresh.")
+        warn("Run 'intent-first init' inside your project to install them.")
+
+    if latest not in (current, VERSION):
+        VERSION_CACHE.write_text(f"{latest}:{int(time.time())}")
+        print()
+        print(f"{GREEN}\u2705 Upgraded to {latest}{RESET}")
+    else:
+        print()
+        print(f"{GREEN}\u2705 Everything refreshed ({current}){RESET}")
     print()
     print("  Per-project .intent-first/rules.md files are NOT auto-updated.")
     print("  Run 'intent-first init' in each project to refresh local rules.")
