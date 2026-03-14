@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-VERSION = "0.2.0"
+VERSION = "1.0.1"
 REPO    = "shc261392/intent-first"
 RAW     = f"https://raw.githubusercontent.com/{REPO}/main"
 
@@ -67,8 +67,8 @@ INTENT_FIRST_PROMPTS = [
 ]
 
 INTENT_FIRST_AGENTS = [
-    "wf-updater.prompt.md",
-    "wf-auditor.prompt.md",
+    "wf-updater.agents.md",
+    "wf-auditor.agents.md",
 ]
 
 # Map tool name (as detected by init/upgrade) → (prompt_dir, agent_dir)
@@ -171,6 +171,8 @@ Usage:
   intent-first new [name]           Create a workflow (auto-numbered or named)
   intent-first lock <ID> <STAGE>    Lock a stage (read-only via chmod + status.yml)
   intent-first unlock <ID> <STAGE>  Unlock a stage (writable)
+  intent-first status-update <ID> <STAGE> --<FIELD> <VALUE>
+                                    Update a status.yml field (for agents)
   intent-first validate [ID]        Validate workflow(s)
   intent-first list                 List all workflows with status
   intent-first upgrade              Download and install the latest version
@@ -431,6 +433,106 @@ def cmd_unlock(args: list[str]) -> None:
 
     target.chmod(target.stat().st_mode | stat.S_IWUSR)
     print(f"\U0001f513 Unlocked {target}")
+
+
+# ── cmd_status_update ─────────────────────────────────────────
+
+# Valid fields for each stage in status.yml
+_STAGE_FIELDS: dict[str, list[str]] = {
+    "intent":     ["status", "locked_at"],
+    "spec":       ["status", "approved_by", "approved_at", "locked_at"],
+    "plan":       ["status", "derived_from", "approved_by", "approved_at", "locked_at"],
+    "execution":  ["status", "started_at", "completed_at", "locked_at"],
+    "artifacts":  ["status", "completed_at", "locked_at"],
+}
+
+
+def cmd_status_update(args: list[str]) -> None:
+    """Update a field in status.yml for a workflow stage.
+    
+    Usage: intent-first status-update <ID> <STAGE> --<FIELD> <VALUE>
+    
+    Examples:
+      intent-first status-update 1 spec --status approved
+      intent-first status-update 1 spec --approved-by "Alice"
+      intent-first status-update 1 execution --status in_progress
+    """
+    if len(args) < 4:
+        print("Usage: intent-first status-update <ID> <STAGE> --<FIELD> <VALUE>")
+        print()
+        print("Examples:")
+        print("  intent-first status-update 1 spec --status approved")
+        print("  intent-first status-update 1 spec --approved-by \"Alice\"")
+        print("  intent-first status-update 1 execution --started-at \"2026-03-15T14:30:00Z\"")
+        sys.exit(1)
+    
+    wid = args[0]
+    stage_input = args[1]
+    
+    validate_workflow_id(wid)
+    
+    stage_key = resolve_stage_key(stage_input)
+    if not stage_key:
+        print(f"\u274c Unknown stage: {stage_input}")
+        print("   Valid: intent, spec, plan, execution, artifacts (or 1-5)")
+        sys.exit(1)
+    
+    # Parse --field value pairs
+    updates: dict[str, str] = {}
+    i = 2
+    while i < len(args):
+        if args[i].startswith("--"):
+            field_name = args[i][2:]  # Remove "--"
+            # Convert hyphens to underscores (e.g., "approved-by" → "approved_by")
+            field_name = field_name.replace("-", "_")
+            
+            if i + 1 >= len(args):
+                print(f"\u274c Missing value for --{field_name}")
+                sys.exit(1)
+            
+            updates[field_name] = args[i + 1]
+            i += 2
+        else:
+            print(f"\u274c Invalid argument: {args[i]}")
+            print("   All updates must be in the form: --<field> <value>")
+            sys.exit(1)
+    
+    if not updates:
+        print("\u274c No fields to update")
+        sys.exit(1)
+    
+    # Validate all fields exist for this stage
+    valid_fields = _STAGE_FIELDS.get(stage_key, [])
+    for field in updates:
+        if field not in valid_fields:
+            print(f"\u274c Invalid field for stage '{stage_key}': {field}")
+            print(f"   Valid fields: {', '.join(valid_fields)}")
+            sys.exit(1)
+    
+    # Update status.yml
+    status_file = WORKFLOW_DIR / wid / "status.yml"
+    if not status_file.is_file():
+        print(f"\u274c Workflow not found: {WORKFLOW_DIR / wid}")
+        sys.exit(1)
+    
+    # If updating timestamp fields, auto-fill current UTC time if not provided
+    if "asked_at" in updates and updates["asked_at"] == "auto":
+        updates["asked_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if "approved_at" in updates and updates["approved_at"] == "auto":
+        updates["approved_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if "locked_at" in updates and updates["locked_at"] == "auto":
+        updates["locked_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if "started_at" in updates and updates["started_at"] == "auto":
+        updates["started_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if "completed_at" in updates and updates["completed_at"] == "auto":
+        updates["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # Apply all updates
+    for field, value in updates.items():
+        update_stage_field(status_file, stage_key, field, value)
+        print(f"  {stage_key}.{field} = {value}")
+    
+    print(f"\u2705 Updated {stage_key} in status.yml")
 
 
 # ── cmd_validate ──────────────────────────────────────────────
@@ -870,17 +972,18 @@ def main() -> None:
         check_latest_version()
 
     dispatch = {
-        "init":     lambda: cmd_init(args[1:]),
-        "new":      lambda: cmd_new(args[1:]),
-        "lock":     lambda: cmd_lock(args[1:]),
-        "unlock":   lambda: cmd_unlock(args[1:]),
-        "validate": lambda: cmd_validate(args[1:]),
-        "list":     lambda: cmd_list(args[1:]),
-        "upgrade":  lambda: cmd_upgrade(args[1:]),
-        "implode":  lambda: cmd_implode(args[1:]),
-        "help":     usage,
-        "--help":   usage,
-        "-h":       usage,
+        "init":           lambda: cmd_init(args[1:]),
+        "new":            lambda: cmd_new(args[1:]),
+        "lock":           lambda: cmd_lock(args[1:]),
+        "unlock":         lambda: cmd_unlock(args[1:]),
+        "status-update":  lambda: cmd_status_update(args[1:]),
+        "validate":       lambda: cmd_validate(args[1:]),
+        "list":           lambda: cmd_list(args[1:]),
+        "upgrade":        lambda: cmd_upgrade(args[1:]),
+        "implode":        lambda: cmd_implode(args[1:]),
+        "help":           usage,
+        "--help":         usage,
+        "-h":             usage,
     }
 
     fn = dispatch.get(cmd)
