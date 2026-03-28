@@ -744,8 +744,13 @@ def cmd_init(args: list[str]) -> None:
 
     global_rules = INTENT_FIRST_HOME / "rules.md"
     if global_rules.is_file():
-        shutil.copy2(global_rules, ".intent-first/rules.md")
-        info("Created .intent-first/rules.md")
+        dest = Path(".intent-first/rules.md")
+        # Check if source and destination are the same (e.g., via symlink)
+        if global_rules.resolve() != dest.resolve():
+            shutil.copy2(global_rules, dest)
+            info("Created .intent-first/rules.md")
+        else:
+            info(".intent-first/rules.md already linked to global rules (skipped)")
     else:
         warn(f"Global rules not found at {global_rules}")
         print("  Re-run the installer, then try again:")
