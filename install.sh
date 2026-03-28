@@ -301,29 +301,15 @@ install_cli() {
 
   mkdir -p "$global_dir"
 
-  # Fetch latest version tag to decide whether to (re)download the CLI
-  local latest_tag=""
-  if command -v curl &>/dev/null; then
-    latest_tag=$(curl -fsSL --proto '=https' "https://api.github.com/repos/$REPO/releases/latest" \
-      2>/dev/null | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-  fi
-
-  local current_version=""
-  if [ -x "$dest" ]; then
-    current_version=$(python3 "$dest" --help 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)
-  fi
-
-  if [ -n "$latest_tag" ] && [ -n "$current_version" ] && [ "$latest_tag" = "$current_version" ]; then
-    info "CLI already up to date ($current_version) — skipping download"
+  # Always download and install the CLI
+  step "Downloading intent-first CLI..."
+  if download "$RAW/cli/intent-first" "$dest"; then
+    chmod +x "$dest"
+    info "Installed CLI → $dest"
   else
-    if download "$RAW/cli/intent-first" "$dest"; then
-      chmod +x "$dest"
-      info "Installed CLI → $dest"
-    else
-      echo "❌ Failed to download intent-first CLI"
-      echo "   Check your internet connection and try again."
-      exit 1
-    fi
+    echo "❌ Failed to download intent-first CLI"
+    echo "   Check your internet connection and try again."
+    exit 1
   fi
   echo ""
 

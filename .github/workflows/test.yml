@@ -38,8 +38,8 @@ jobs:
 
       - name: Verify CLI installed globally
         run: |
-          test -x "$HOME/.intent_first/bin/intent-first"
-          echo "CLI is executable at ~/.intent_first/bin/"
+          test -x "$HOME/.intent-first/bin/intent-first"
+          echo "CLI is executable at ~/.intent-first/bin/"
 
       - name: Verify .gitignore updated
         run: |
@@ -51,57 +51,57 @@ jobs:
       - name: Test CLI help
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" help
+          "$HOME/.intent-first/bin/intent-first" help
 
       - name: Test CLI new workflow
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" new
-          test -d workflow/1
-          test -f workflow/1/s1_intent.md
-          test -f workflow/1/s2_spec.md
-          test -f workflow/1/s3_plan.md
-          test -f workflow/1/s4_execution.md
-          test -f workflow/1/s5_artifacts.md
+          "$HOME/.intent-first/bin/intent-first" new
+          test -d .intent-first/workflows/1
+          test -f .intent-first/workflows/1/s1_intent.md
+          test -f .intent-first/workflows/1/s2_spec.md
+          test -f .intent-first/workflows/1/s3_plan.md
+          test -f .intent-first/workflows/1/s4_execution.md
+          test -f .intent-first/workflows/1/s5_artifacts.md
           echo "Workflow 1 created with all stage files"
 
       - name: Test CLI lock and unlock
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" lock 1 intent
-          ! test -w workflow/1/s1_intent.md
+          "$HOME/.intent-first/bin/intent-first" lock 1 intent
+          ! test -w .intent-first/workflows/1/s1_intent.md
           echo "Lock works (file is read-only)"
-          "$HOME/.intent_first/bin/intent-first" unlock 1 intent
-          test -w workflow/1/s1_intent.md
+          "$HOME/.intent-first/bin/intent-first" unlock 1 intent
+          test -w .intent-first/workflows/1/s1_intent.md
           echo "Unlock works (file is writable)"
 
       - name: Test CLI validate
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" validate 1
+          "$HOME/.intent-first/bin/intent-first" validate 1
 
       - name: Test CLI list
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" list
+          "$HOME/.intent-first/bin/intent-first" list
 
       - name: Test CLI auto-numbering
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" new
-          test -d workflow/2
+          "$HOME/.intent-first/bin/intent-first" new
+          test -d .intent-first/workflows/2
           echo "Auto-numbering works (2 created)"
 
       - name: Test CLI named workflow (slug)
         run: |
           cd /tmp/test-project
-          "$HOME/.intent_first/bin/intent-first" new add-auth
-          test -d workflow/add-auth
-          test -f workflow/add-auth/s1_intent.md
+          "$HOME/.intent-first/bin/intent-first" new add-auth
+          test -d .intent-first/workflows/add-auth
+          test -f .intent-first/workflows/add-auth/s1_intent.md
           echo "Named workflow created"
 
       - name: Test unknown command fails
         run: |
           cd /tmp/test-project
-          ! "$HOME/.intent_first/bin/intent-first" nonexistent
+          ! "$HOME/.intent-first/bin/intent-first" nonexistent
           echo "Unknown command correctly rejected"
