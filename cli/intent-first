@@ -300,8 +300,8 @@ def _install_to_dir(dir_path: Path, files: list[str], file_type: str) -> bool:
     return installed
 
 
-def _install_prompts_and_agents(tools: list[str]) -> None:
-    """Download latest prompts and agent files. Always installs to .github/ as fallback."""
+def _install_prompts_and_agents(tools: list[str]) -> bool:
+    """Download latest prompts and agent files. Always installs to .github/ as fallback. Returns True if anything was installed."""
     installed_prompt_dirs: list[Path] = []
     installed_agent_dirs:  list[Path] = []
     
@@ -334,10 +334,18 @@ def _install_prompts_and_agents(tools: list[str]) -> None:
         if _install_to_dir(copilot_agents, INTENT_FIRST_AGENTS, "agents"):
             installed_agent_dirs.append(copilot_agents)
 
+    any_installed = len(installed_prompt_dirs) > 0 or len(installed_agent_dirs) > 0
+    
     for pd in installed_prompt_dirs:
         info(f"Installed {len(INTENT_FIRST_PROMPTS)} prompts → {pd}/")
     for ad in installed_agent_dirs:
         info(f"Installed {len(INTENT_FIRST_AGENTS)} agents → {ad}/")
+    
+    if not any_installed:
+        warn("Could not download prompts and agents. Check your internet connection.")
+        return False
+    
+    return True
 
 
 def _ask_tool_interactive() -> list[str]:
@@ -782,7 +790,11 @@ def cmd_init(args: list[str]) -> None:
             _init_rules_oneliner(_TOOL_FILES[t], one_liner)
 
     step("Installing prompts and agents...")
-    _install_prompts_and_agents(tools)
+    if not _install_prompts_and_agents(tools):
+        print()
+        warn("Failed to install prompts and agents.")
+        warn("Re-run after checking your internet connection: intent-first init")
+        sys.exit(1)
 
     print()
     print(f"{GREEN}\u2705 Intent-First initialized!{RESET}")
@@ -888,7 +900,10 @@ def cmd_upgrade(_args: list[str]) -> None:
     # If still no tools detected, default to at least copilot (⇒ .github/)
     if not upgrade_tools:
         upgrade_tools = ["copilot"]
-    _install_prompts_and_agents(list(dict.fromkeys(upgrade_tools)))
+    
+    prompts_agents_ok = _install_prompts_and_agents(list(dict.fromkeys(upgrade_tools)))
+    if not prompts_agents_ok:
+        warn("Some files could not be refreshed. Check your internet connection.")
 
     if latest not in (current, VERSION):
         VERSION_CACHE.write_text(f"{latest}:{int(time.time())}")

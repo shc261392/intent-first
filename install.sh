@@ -53,8 +53,8 @@ detect_downloader() {
 download() {
   local url="$1" dest="$2"
   case "$DOWNLOADER" in
-    curl) curl -fsSL --proto '=https' "$url" -o "$dest" ;;
-    wget) wget --https-only -qO "$dest" "$url" ;;
+    curl) curl -fsSL --proto '=https' "$url" -o "$dest" || return 1 ;;
+    wget) wget --https-only -qO "$dest" "$url" || return 1 ;;
     *)    echo "No download tool found (need curl or wget)"; exit 1 ;;
   esac
 }
@@ -316,9 +316,14 @@ install_cli() {
   if [ -n "$latest_tag" ] && [ -n "$current_version" ] && [ "$latest_tag" = "$current_version" ]; then
     info "CLI already up to date ($current_version) — skipping download"
   else
-    download "$RAW/cli/intent-first" "$dest"
-    chmod +x "$dest"
-    info "Installed CLI → $dest"
+    if download "$RAW/cli/intent-first" "$dest"; then
+      chmod +x "$dest"
+      info "Installed CLI → $dest"
+    else
+      echo "❌ Failed to download intent-first CLI"
+      echo "   Check your internet connection and try again."
+      exit 1
+    fi
   fi
   echo ""
 
