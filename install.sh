@@ -92,6 +92,46 @@ path_contains() {
   echo "$PATH" | tr ':' '\n' | grep -qx "$dir"
 }
 
+# ── Ask user which tool they use (interactive fallback) ───────────
+ask_tool_interactive() {
+  echo ""
+  echo "  No AI tool configuration detected."
+  echo "  Which AI coding tool do you use? (enter number(s), comma-separated)"
+  echo ""
+  echo "    1) GitHub Copilot (VS Code)"
+  echo "    2) Cursor"
+  echo "    3) Claude Code"
+  echo "    4) Windsurf"
+  echo "    5) Aider"
+  echo "    6) Cline / Roo"
+  echo "    7) None / skip"
+  echo ""
+  printf "  Choice(s) [1]: "
+  local reply
+  if [ -t 0 ]; then
+    read -r reply
+  else
+    read -r reply < /dev/tty
+  fi
+  reply="${reply:-1}"
+  local tools=()
+  IFS=',' read -ra choices <<< "$reply"
+  for c in "${choices[@]}"; do
+    c="${c// /}"  # trim spaces
+    case "$c" in
+      1) tools+=("copilot") ;;
+      2) tools+=("cursor") ;;
+      3) tools+=("claude") ;;
+      4) tools+=("windsurf") ;;
+      5) tools+=("aider") ;;
+      6) tools+=("cline") ;;
+      7) ;; # skip
+      *) warn "Unknown choice: $c (skipped)" ;;
+    esac
+  done
+  echo "${tools[@]}"
+}
+
 # ── Detect AI tools in use ─────────────────────────────────────
 detect_tools() {
   local tools=()
@@ -131,10 +171,8 @@ detect_tools() {
     tools+=("antigravity")
   fi
 
-  # If nothing detected, default to all common tools
-  if [ ${#tools[@]} -eq 0 ]; then
-    tools=("copilot" "cursor" "claude")
-  fi
+  # Return empty if nothing detected — caller will ask interactively
+  # (Do not silently install files for tools the user doesn't use)
 
   echo "${tools[@]}"
 }
@@ -170,10 +208,10 @@ install_prompts_to() {
 install_agents_to() {
   local dest_dir="$1"
   mkdir -p "$dest_dir"
-  for agent in wf-updater.agents.md wf-auditor.agents.md; do
+  for agent in wf-auditor.agents.md; do
     download "$RAW/agents/$agent" "$dest_dir/$agent"
   done
-  info "Installed 2 agent files → $dest_dir/"
+  info "Installed 1 agent file → $dest_dir/"
 }
 
 install_copilot() {
@@ -344,7 +382,12 @@ info "Using: $DOWNLOADER"
 
 # Detect tools
 TOOLS=($(detect_tools))
-info "Detected tools: ${TOOLS[*]}"
+if [ ${#TOOLS[@]} -gt 0 ]; then
+  info "Detected tools: ${TOOLS[*]}"
+else
+  TOOLS=($(ask_tool_interactive))
+  [ ${#TOOLS[@]} -gt 0 ] && info "Installing for tools: ${TOOLS[*]}"
+fi
 
 header "⚡ Installing CLI..."
 install_cli

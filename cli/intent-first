@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 REPO    = "shc261392/intent-first"
 RAW     = f"https://raw.githubusercontent.com/{REPO}/main"
 
@@ -67,7 +67,6 @@ INTENT_FIRST_PROMPTS = [
 ]
 
 INTENT_FIRST_AGENTS = [
-    "wf-updater.agents.md",
     "wf-auditor.agents.md",
 ]
 
@@ -306,7 +305,7 @@ def _install_prompts_and_agents(tools: list[str]) -> None:
     installed_prompt_dirs: list[Path] = []
     installed_agent_dirs:  list[Path] = []
     
-    # First, try to install to any tool that has directories defined
+    # Install to detected tool directories
     for t in tools:
         dirs = _TOOL_DIRS.get(t)
         if not dirs:
@@ -323,7 +322,7 @@ def _install_prompts_and_agents(tools: list[str]) -> None:
                 if ad not in installed_agent_dirs:
                     installed_agent_dirs.append(ad)
     
-    # ALWAYS ensure .github/ has the prompts and agents, even if no other tool-specific dirs were populated
+    # ALWAYS ensure .github/ has the prompts (Copilot fallback), but not agents if not explicitly a Copilot project
     copilot_prompts = Path(".github/prompts")
     copilot_agents = Path(".github/agents")
     
@@ -331,7 +330,7 @@ def _install_prompts_and_agents(tools: list[str]) -> None:
         if _install_to_dir(copilot_prompts, INTENT_FIRST_PROMPTS, "prompts"):
             installed_prompt_dirs.append(copilot_prompts)
     
-    if copilot_agents not in installed_agent_dirs:
+    if "copilot" in tools and copilot_agents not in installed_agent_dirs:
         if _install_to_dir(copilot_agents, INTENT_FIRST_AGENTS, "agents"):
             installed_agent_dirs.append(copilot_agents)
 
@@ -339,6 +338,47 @@ def _install_prompts_and_agents(tools: list[str]) -> None:
         info(f"Installed {len(INTENT_FIRST_PROMPTS)} prompts → {pd}/")
     for ad in installed_agent_dirs:
         info(f"Installed {len(INTENT_FIRST_AGENTS)} agents → {ad}/")
+
+
+def _ask_tool_interactive() -> list[str]:
+    """Ask interactively which AI tool the user uses when auto-detection finds nothing."""
+    options = [
+        ("1", "copilot",     "GitHub Copilot (VS Code)"),
+        ("2", "cursor",      "Cursor"),
+        ("3", "claude",      "Claude Code"),
+        ("4", "windsurf",    "Windsurf"),
+        ("5", "aider",       "Aider"),
+        ("6", "cline",       "Cline / Roo"),
+        ("7", None,          "None / skip"),
+    ]
+    print()
+    print("  No AI tool configuration detected.")
+    print("  Which AI coding tool do you use? (enter number(s), comma-separated)")
+    print()
+    for num, _, label in options:
+        print(f"    {num}) {label}")
+    print()
+    try:
+        if sys.stdin.isatty():
+            sys.stdout.write("  Choice(s) [1]: ")
+            sys.stdout.flush()
+            reply = sys.stdin.readline().strip() or "1"
+        else:
+            with open("/dev/tty") as tty:
+                sys.stdout.write("  Choice(s) [1]: ")
+                sys.stdout.flush()
+                reply = tty.readline().strip() or "1"
+    except (EOFError, OSError):
+        reply = "1"
+    lookup = {num: name for num, name, _ in options if name}
+    tools: list[str] = []
+    for c in reply.replace(" ", "").split(","):
+        name = lookup.get(c)
+        if name:
+            tools.append(name)
+        elif c not in ("", "7"):
+            warn(f"Unknown choice: {c} (skipped)")
+    return tools
 
 
 # ── cmd_new ───────────────────────────────────────────────────
@@ -732,7 +772,7 @@ def cmd_init(args: list[str]) -> None:
         if Path(".clinerules").is_file() or Path(".cline").is_dir():
             tools.append("cline")
         if not tools:
-            tools = ["copilot", "cursor", "claude"]
+            tools = _ask_tool_interactive()
     else:
         tools = [tool]
 
@@ -747,11 +787,12 @@ def cmd_init(args: list[str]) -> None:
     print()
     print(f"{GREEN}\u2705 Intent-First initialized!{RESET}")
     print()
-    print("  Commit .intent-first/rules.md \u2014 it's your project-local workflow ruleset.")
-    print("  .intent-first/workflows/ is gitignored \u2014 workflow data stays local.")
+    print("  \U0001f4cb Next steps:")
+    print("     1. Commit .intent-first/rules.md (your project-local workflow ruleset)")
+    print("     2. Run: intent-first new")
+    print("     3. Tell your AI agent: /wf-spec 1")
     print()
-    print("  Start your first workflow:")
-    print("    intent-first new")
+    print("  \U0001f4d6 For workflow documentation, see .intent-first/rules.md")
 
 
 # ── cmd_upgrade ───────────────────────────────────────────────
@@ -853,12 +894,19 @@ def cmd_upgrade(_args: list[str]) -> None:
         VERSION_CACHE.write_text(f"{latest}:{int(time.time())}")
         print()
         print(f"{GREEN}\u2705 Upgraded to {latest}{RESET}")
+        print()
+        print("  Major changes in this version:")
+        print("    • Agents now write directly to workflow files (no Workflow Updater agent)")
+        print("    • Write-to-file mandate: all thinking must appear in workflow files")
+        print("    • Interactive tool selection if none detected during init")
     else:
         print()
         print(f"{GREEN}\u2705 Everything refreshed ({current}){RESET}")
     print()
-    print("  Per-project .intent-first/rules.md files are NOT auto-updated.")
-    print("  Run 'intent-first init' in each project to refresh local rules.")
+    print("  \U0001f4cb Next steps:")
+    print("     1. Run in each project: intent-first init")
+    print("     2. .intent-first/rules.md will be updated with latest rules")
+    print("     3. Prompts and agents in your tool dirs will be refreshed")
 
 
 # ── cmd_implode ───────────────────────────────────────────────
