@@ -110,8 +110,10 @@ ask_tool_interactive() {
   local reply
   if [ -t 0 ]; then
     read -r reply
-  else
+  elif (: < /dev/tty) 2>/dev/null; then
     read -r reply < /dev/tty
+  else
+    reply=""  # non-interactive (CI) — use default
   fi
   reply="${reply:-1}"
   local tools=()
@@ -281,10 +283,10 @@ install_templates() {
     cp -r "$dest" "$bk"; info "Backed up templates → $(basename "$bk")"
   fi
   mkdir -p "$dest"
-  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md status.yml; do
+  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md status.yml execution-graph.json; do
     download "$RAW/templates/$tmpl" "$dest/$tmpl"
   done
-  info "Installed 6 templates → $dest/"
+  info "Installed 7 templates → $dest/"
 }
 
 # ── Install CLI (global) ──────────────────────────────────────
@@ -337,8 +339,10 @@ install_cli() {
   # Read from /dev/tty so it works even when script is piped through curl | bash
   if [ -t 0 ]; then
     read -r reply
-  else
+  elif (: < /dev/tty) 2>/dev/null; then
     read -r reply < /dev/tty
+  else
+    reply=""  # non-interactive (CI) — use default (Y)
   fi
 
   case "${reply:-Y}" in
@@ -358,6 +362,7 @@ install_cli() {
 
 header "🎯 Intent-First Workflow Installer"
 echo "   https://github.com/$REPO"
+echo "   Primary support: VSCode GitHub Copilot extension & Copilot CLI"
 echo ""
 
 OS=$(detect_os)

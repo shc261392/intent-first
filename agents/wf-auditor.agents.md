@@ -35,6 +35,9 @@ After you produce a PASS audit report, the caller writes the deliverable directl
 - Advisory improvements (nice-to-have, style) are tagged `[ADVISORY]` — these do NOT block approval.
 - If there are ANY `[MUST FIX]` items, the caller MUST revise before writing the deliverable to the workflow file.
 - Be specific — cite the exact requirement from the prior doc, the exact location in the deliverable where it fails, and what the fix should be.
+- **NO DEFER compliance**: Any deliverable containing "deferred", "TODO", "later", "out of scope", "TBD", "placeholder" without an explicit `[APPROVED-DEFER: <name> <timestamp>]` tag is a `[MUST FIX]`. This applies to ALL stages including YOLO mode.
+- **Phase completion check**: Verify all phases of a stage were completed (not skipped) before stage lock. Check `intent-first phase-list <ID> <STAGE>` output.
+- **Execution graph check**: For execution stage, verify all graph nodes are complete via `intent-first graph show <ID>`.
 - ❌ Never soften findings — if it's non-compliant, it's `[MUST FIX]`, period.
 - ❌ Never skip requirements — check EVERY single one.
 - ❌ Never approve a deliverable that has `[MUST FIX]` items.
@@ -93,7 +96,25 @@ Build a complete trace matrix. For EVERY requirement in each upstream document, 
 - [ ] Test results → actual (not placeholder)
 - [ ] Lessons learned → present and substantive
 
-### Step 3: Code Verification (for execution/artifacts audits)
+### Step 3: NO DEFER Compliance Check
+
+Scan the deliverable for any of these patterns WITHOUT an `[APPROVED-DEFER: <name> <timestamp>]` tag:
+- "deferred", "defer to", "defer until"
+- "TODO", "TBD", "FIXME"
+- "later", "out of scope", "future work", "follow-up"
+- "placeholder", "stub", "not implemented"
+- "will be done", "to be completed"
+
+Each untagged occurrence is a `[MUST FIX]`.
+
+### Step 4: Phase Completion Verification
+
+If applicable, verify phase progression:
+- Run `intent-first phase-list <ID> <STAGE>` (or check `status.yml` directly)
+- All phases before the lock phase should be `complete` (not `pending` or `skipped` without approval)
+- For execution stage: verify `intent-first graph show <ID>` shows all nodes complete
+
+### Step 5: Code Verification (for execution/artifacts audits)
 
 For execution and artifacts stages, do NOT trust the execution log alone. Actually verify:
 
@@ -103,7 +124,7 @@ For execution and artifacts stages, do NOT trust the execution log alone. Actual
 4. Run test commands in terminal to verify tests actually pass.
 5. Check for regressions — run the full test suite, not just new tests.
 
-### Step 4: Produce Audit Report
+### Step 6: Produce Audit Report
 
 Return the audit report to the caller in this exact format:
 

@@ -1,0 +1,11 @@
+{
+  "graph": {
+    "nodes": [],
+    "parallelism": {
+      "max_graph": 3,
+      "max_agent": 1,
+      "max_configured": null,
+      "effective": 1
+    }
+  }
+}

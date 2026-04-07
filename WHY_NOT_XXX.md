@@ -86,7 +86,7 @@ MCP is a transport layer — it gives agents access to external tools. Intent-Fi
 
 ### 20. Why not build a VS Code extension / IDE plugin instead?
 
-Because that locks you into one editor. Intent-First works with Copilot in VS Code, Cursor, Claude Code in terminal, Aider in terminal, Windsurf, Cline, and Antigravity — all from the same set of markdown files. An extension would be a nice-to-have on top, but the protocol itself must remain tool-agnostic.
+Because that locks you into one editor. Intent-First is primarily tested with VSCode GitHub Copilot extension and Copilot CLI, but works with Cursor, Claude Code in terminal, Aider in terminal, Windsurf, Cline, and Antigravity — all from the same set of markdown files. An extension would be a nice-to-have on top, but the protocol itself must remain tool-agnostic.
 
 ---
 

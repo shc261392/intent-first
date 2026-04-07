@@ -4,6 +4,12 @@
 # See .intent-first/rules.md for valid status values and transition rules.
 
 workflow_id: ""
+parent_workflow: ""
+spawned_from_stage: ""
+spawned_workflows: []
+linked_workflows: []
+tags: []
+priority: ""
 
 stages:
   intent:
@@ -12,12 +18,57 @@ stages:
 
   spec:
     status: pending     # pending | draft | approved | locked
+    current_phase: ""
+    phases:
+      codebase-explore:
+        status: pending    # pending | in_progress | complete | skipped
+        started_at: ""
+        completed_at: ""
+      intent-mapping:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      intent-lock:
+        status: pending
+        completed_at: ""
+      research:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      spec-drafting:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      spec-iteration:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      spec-lock:
+        status: pending
+        completed_at: ""
     approved_by: ""     # human name
     approved_at: ""     # ISO 8601 UTC
     locked_at: ""       # ISO 8601 UTC
 
   plan:
     status: pending     # pending | draft | approved | locked
+    current_phase: ""
+    phases:
+      execution-graph-draft:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      plan-iteration:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      execution-graph-finalization:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      plan-lock:
+        status: pending
+        completed_at: ""
     derived_from: "s2_spec.md"
     approved_by: ""     # human name
     approved_at: ""     # ISO 8601 UTC
@@ -25,11 +76,33 @@ stages:
 
   execution:
     status: pending     # pending | in_progress | complete | locked
+    current_phase: ""
+    phases:
+      execution-iteration:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      execution-lock:
+        status: pending
+        completed_at: ""
     started_at: ""      # ISO 8601 UTC
     completed_at: ""    # ISO 8601 UTC
     locked_at: ""       # ISO 8601 UTC
 
   artifacts:
     status: pending     # pending | draft | complete | locked
+    current_phase: ""
+    phases:
+      artifacts-iteration:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      new-workflow-spawning:
+        status: pending
+        started_at: ""
+        completed_at: ""
+      artifacts-lock:
+        status: pending
+        completed_at: ""
     completed_at: ""    # ISO 8601 UTC
     locked_at: ""       # ISO 8601 UTC

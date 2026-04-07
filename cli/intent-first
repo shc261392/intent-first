@@ -17,13 +17,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 REPO    = "shc261392/intent-first"
 RAW     = f"https://raw.githubusercontent.com/{REPO}/main"
 
 INTENT_FIRST_HOME = Path(os.environ.get("INTENT_FIRST_HOME", Path.home() / ".intent-first"))
 WORKFLOW_DIR      = Path(os.environ.get("INTENT_FIRST_WORKFLOW_DIR", ".intent-first/workflows"))
 TEMPLATE_DIR      = Path(os.environ.get("INTENT_FIRST_TEMPLATE_DIR", INTENT_FIRST_HOME / "templates"))
+CONFIG_FILE       = INTENT_FIRST_HOME / "config.yml"
 VERSION_CACHE     = INTENT_FIRST_HOME / ".version-cache"
 VERSION_CHECK_TTL = 2592000  # 30 days in seconds
 
@@ -31,6 +32,25 @@ STAGE_FILES = [
     "s1_intent.md", "s2_spec.md", "s3_plan.md",
     "s4_execution.md", "s5_artifacts.md", "status.yml",
 ]
+
+# ── Phase definitions (canonical order per stage) ────────────
+STAGE_PHASES: dict[str, list[str]] = {
+    "spec": [
+        "codebase-explore", "intent-mapping", "intent-lock",
+        "research", "spec-drafting", "spec-iteration", "spec-lock",
+    ],
+    "plan": [
+        "execution-graph-draft", "plan-iteration",
+        "execution-graph-finalization", "plan-lock",
+    ],
+    "execution": [
+        # Dynamic graph nodes are prepended at runtime; these are the fixed tail phases
+        "execution-iteration", "execution-lock",
+    ],
+    "artifacts": [
+        "artifacts-iteration", "new-workflow-spawning", "artifacts-lock",
+    ],
+}
 
 TOOL_RULES = [
     ".github/copilot-instructions.md",
@@ -172,6 +192,24 @@ Usage:
   intent-first unlock <ID> <STAGE>  Unlock a stage (writable)
   intent-first status-update <ID> <STAGE> --<FIELD> <VALUE>
                                     Update a status.yml field (for agents)
+  intent-first phase-update <ID> <STAGE> <PHASE> --status <STATUS>
+                                    Update a phase status within a stage
+  intent-first phase-list <ID> <STAGE>
+                                    List all phases and their statuses for a stage
+  intent-first graph create <ID>    Create an empty execution graph
+  intent-first graph show <ID>      Show execution graph with status
+  intent-first graph ready <ID>     List nodes ready for execution
+  intent-first graph update <ID> <NODE> --status <STATUS>
+                                    Update a graph node status
+  intent-first graph validate <ID>  Validate graph integrity
+  intent-first spawn <PARENT_ID> <NAME> [--intent "text"]
+                                    Create a child workflow linked to parent
+  intent-first link <ID1> <ID2> [--relation follows|blocks|related]
+                                    Link two workflows
+  intent-first status [--workflow <ID>]
+                                    Show workflow status (all or one)
+  intent-first configure --name "N" [--max-parallelism N] [--get <KEY>]
+                                    Set or get user preferences
   intent-first validate [ID]        Validate workflow(s)
   intent-first list                 List all workflows with status
   intent-first upgrade              Download and install the latest version
@@ -274,6 +312,346 @@ def update_stage_field(status_file: Path, stage: str, field: str, value: str) ->
             os.unlink(tmp)
         except OSError:
             pass
+
+
+# ── Config helpers ────────────────────────────────────────────
+
+def _read_config() -> dict[str, str]:
+    """Read ~/.intent-first/config.yml as simple key: value pairs."""
+    cfg: dict[str, str] = {}
+    if CONFIG_FILE.is_file():
+        for line in CONFIG_FILE.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and ":" in line:
+                k, v = line.split(":", 1)
+                cfg[k.strip()] = v.strip().strip('"').strip("'")
+    return cfg
+
+
+def _write_config(cfg: dict[str, str]) -> None:
+    """Write config as simple YAML-like key: value pairs."""
+    INTENT_FIRST_HOME.mkdir(parents=True, exist_ok=True)
+    lines = ["# Intent-First user configuration\n"]
+    for k, v in cfg.items():
+        lines.append(f'{k}: "{v}"\n')
+    CONFIG_FILE.write_text("".join(lines))
+
+
+def get_config_value(key: str) -> str:
+    """Get a single config value by key."""
+    return _read_config().get(key, "")
+
+
+# ── Phase helpers ─────────────────────────────────────────────
+
+def _read_phase_status(status_file: Path, stage: str, phase: str) -> str:
+    """Read a phase status from status.yml. Returns empty string if not found."""
+    if not status_file.is_file():
+        return ""
+    text = status_file.read_text()
+    # Find the stage block, then the phases block, then the specific phase
+    in_stage = False
+    in_phases = False
+    in_phase = False
+    for line in text.splitlines():
+        if re.match(r"^  [a-z]", line) and not re.match(r"^    ", line):
+            in_stage = line.strip().startswith(f"{stage}:")
+            in_phases = False
+            in_phase = False
+        if in_stage and line.strip() == "phases:":
+            in_phases = True
+            continue
+        if in_phases and re.match(r"^      [a-z]", line):
+            in_phase = line.strip().startswith(f"{phase}:")
+        if in_phase and re.match(r"^        status:", line):
+            return line.split(":", 1)[1].strip().strip('"').split("#")[0].strip()
+        # Exit phases block if we hit a non-indented line
+        if in_phases and re.match(r"^    [a-z]", line) and not re.match(r"^      ", line):
+            if not line.strip().startswith("phases:"):
+                in_phases = False
+    return ""
+
+
+def _update_phase_field(status_file: Path, stage: str, phase: str, field: str, value: str) -> None:
+    """Update a field in a phase block within status.yml."""
+    if not status_file.is_file() or not os.access(status_file, os.W_OK):
+        return
+    lines = status_file.read_text().splitlines(keepends=True)
+    in_stage = False
+    in_phases = False
+    in_phase = False
+    for i, line in enumerate(lines):
+        stripped = line.rstrip("\n")
+        if re.match(r"^  [a-z]", stripped) and not re.match(r"^    ", stripped):
+            in_stage = stripped.strip().startswith(f"{stage}:")
+            in_phases = False
+            in_phase = False
+        if in_stage and stripped.strip() == "phases:":
+            in_phases = True
+            continue
+        if in_phases and re.match(r"^      [a-z]", stripped):
+            in_phase = stripped.strip().startswith(f"{phase}:")
+        if in_phase and re.match(rf"^        {re.escape(field)}:", stripped):
+            lines[i] = f'        {field}: "{value}"\n'
+            break
+        if in_phases and re.match(r"^    [a-z]", stripped) and not re.match(r"^      ", stripped):
+            if not stripped.strip().startswith("phases:"):
+                in_phases = False
+    fd, tmp = tempfile.mkstemp(dir=status_file.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.writelines(lines)
+        Path(tmp).replace(status_file)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+# ── Execution Graph Engine ────────────────────────────────────
+
+class ExecutionGraph:
+    """Zero-dependency DAG engine for execution graph management.
+    
+    Stores/loads graph as JSON (Python stdlib) since the nested structure
+    is too complex for the line-by-line YAML parser. The file is named
+    execution-graph.json in the workflow directory.
+    """
+
+    def __init__(self) -> None:
+        self.nodes: list[dict] = []
+        self.parallelism: dict[str, object] = {
+            "max_graph": 3,
+            "max_agent": 1,
+            "max_configured": None,
+            "effective": 1,
+        }
+
+    @classmethod
+    def load(cls, path: Path) -> "ExecutionGraph":
+        g = cls()
+        if path.is_file():
+            data = json.loads(path.read_text())
+            graph = data.get("graph", data)
+            g.nodes = graph.get("nodes", [])
+            g.parallelism = graph.get("parallelism", g.parallelism)
+        return g
+
+    def save(self, path: Path) -> None:
+        data = {"graph": {"nodes": self.nodes, "parallelism": self.parallelism}}
+        path.write_text(json.dumps(data, indent=2) + "\n")
+
+    def _node_map(self) -> dict[str, dict]:
+        return {n["id"]: n for n in self.nodes}
+
+    def ready_nodes(self) -> list[dict]:
+        """Return nodes whose deps are all complete and own status is pending."""
+        nm = self._node_map()
+        ready = []
+        for n in self.nodes:
+            if n.get("status") != "pending":
+                continue
+            deps = n.get("depends_on", [])
+            if all(nm.get(d, {}).get("status") == "complete" for d in deps):
+                ready.append(n)
+        return ready
+
+    def start_node(self, node_id: str) -> bool:
+        for n in self.nodes:
+            if n["id"] == node_id:
+                n["status"] = "in_progress"
+                n["started_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                return True
+        return False
+
+    def complete_node(self, node_id: str) -> bool:
+        for n in self.nodes:
+            if n["id"] == node_id:
+                n["status"] = "complete"
+                n["completed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                return True
+        return False
+
+    def fail_node(self, node_id: str) -> bool:
+        for n in self.nodes:
+            if n["id"] == node_id:
+                n["status"] = "failed"
+                # Propagate blocked to descendants
+                self._propagate_blocked(node_id)
+                return True
+        return False
+
+    def _propagate_blocked(self, failed_id: str) -> None:
+        """Mark all transitive dependents of a failed node as blocked."""
+        nm = self._node_map()
+        queue = [failed_id]
+        visited: set[str] = set()
+        while queue:
+            current = queue.pop(0)
+            for n in self.nodes:
+                if current in n.get("depends_on", []) and n["id"] not in visited:
+                    if n.get("status") in ("pending", "in_progress"):
+                        n["status"] = "blocked"
+                    visited.add(n["id"])
+                    queue.append(n["id"])
+
+    def reset_node(self, node_id: str) -> bool:
+        for n in self.nodes:
+            if n["id"] == node_id:
+                n["status"] = "pending"
+                n["started_at"] = ""
+                n["completed_at"] = ""
+                return True
+        return False
+
+    def validate(self) -> list[str]:
+        """Check for cycles, missing deps, orphans. Returns list of issues."""
+        issues: list[str] = []
+        nm = self._node_map()
+        ids = set(nm.keys())
+        # Check missing deps
+        for n in self.nodes:
+            for d in n.get("depends_on", []):
+                if d not in ids:
+                    issues.append(f"Node '{n['id']}' depends on unknown node '{d}'")
+        # Cycle detection via DFS
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: dict[str, int] = {nid: WHITE for nid in ids}
+
+        def dfs(nid: str) -> bool:
+            color[nid] = GRAY
+            node = nm[nid]
+            for dep_id in node.get("depends_on", []):
+                if dep_id not in color:
+                    continue
+                if color[dep_id] == GRAY:
+                    issues.append(f"Cycle detected involving node '{dep_id}'")
+                    return True
+                if color[dep_id] == WHITE:
+                    if dfs(dep_id):
+                        return True
+            color[nid] = BLACK
+            return False
+
+        for nid in ids:
+            if color[nid] == WHITE:
+                dfs(nid)
+        return issues
+
+    def topological_order(self) -> list[str]:
+        """Kahn's algorithm for topological sort."""
+        nm = self._node_map()
+        # in_degree[n] = number of n's dependencies that exist in the graph
+        in_deg: dict[str, int] = {}
+        for n in self.nodes:
+            in_deg[n["id"]] = len([d for d in n.get("depends_on", []) if d in nm])
+        queue: list[str] = [nid for nid, deg in in_deg.items() if deg == 0]
+        order: list[str] = []
+        while queue:
+            nid = queue.pop(0)
+            order.append(nid)
+            # For each node that depends on nid, decrease its in-degree
+            for n in self.nodes:
+                if nid in n.get("depends_on", []):
+                    in_deg[n["id"]] -= 1
+                    if in_deg[n["id"]] == 0:
+                        queue.append(n["id"])
+        return order
+
+    def progress_summary(self) -> dict[str, int]:
+        counts: dict[str, int] = {"pending": 0, "in_progress": 0, "complete": 0, "failed": 0, "blocked": 0}
+        for n in self.nodes:
+            st = n.get("status", "pending")
+            counts[st] = counts.get(st, 0) + 1
+        return counts
+
+    def depth_map(self) -> dict[str, int]:
+        """Return the depth (longest path from a root) for each node."""
+        nm = self._node_map()
+        depths: dict[str, int] = {}
+
+        def get_depth(nid: str) -> int:
+            if nid in depths:
+                return depths[nid]
+            node = nm.get(nid)
+            if not node or not node.get("depends_on"):
+                depths[nid] = 0
+                return 0
+            d = max(get_depth(dep) for dep in node["depends_on"] if dep in nm) + 1
+            depths[nid] = d
+            return d
+
+        for nid in nm:
+            get_depth(nid)
+        return depths
+
+
+def _graph_path(wid: str) -> Path:
+    return WORKFLOW_DIR / wid / "execution-graph.json"
+
+
+# ── Workflow metadata helpers ─────────────────────────────────
+
+def _read_top_level_field(status_file: Path, field: str) -> str:
+    """Read a top-level field from status.yml (not inside stages block)."""
+    if not status_file.is_file():
+        return ""
+    for line in status_file.read_text().splitlines():
+        if line.startswith(f"{field}:"):
+            return line.split(":", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def _update_top_level_field(status_file: Path, field: str, value: str) -> None:
+    """Update or add a top-level field in status.yml."""
+    if not status_file.is_file() or not os.access(status_file, os.W_OK):
+        return
+    lines = status_file.read_text().splitlines(keepends=True)
+    found = False
+    for i, line in enumerate(lines):
+        if line.startswith(f"{field}:"):
+            lines[i] = f'{field}: "{value}"\n'
+            found = True
+            break
+    if not found:
+        # Insert after workflow_id line
+        for i, line in enumerate(lines):
+            if line.startswith("workflow_id:"):
+                lines.insert(i + 1, f'{field}: "{value}"\n')
+                found = True
+                break
+        if not found:
+            lines.append(f'{field}: "{value}"\n')
+    fd, tmp = tempfile.mkstemp(dir=status_file.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.writelines(lines)
+        Path(tmp).replace(status_file)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _read_list_field(status_file: Path, field: str) -> list[str]:
+    """Read a top-level list field (e.g., spawned_workflows: [...])."""
+    raw = _read_top_level_field(status_file, field)
+    if not raw or raw == "[]":
+        return []
+    # Simple parse: remove brackets, split by comma
+    raw = raw.strip("[]")
+    return [x.strip().strip('"').strip("'") for x in raw.split(",") if x.strip()]
+
+
+def _append_list_field(status_file: Path, field: str, value: str) -> None:
+    """Append a value to a top-level list field."""
+    current = _read_list_field(status_file, field)
+    if value not in current:
+        current.append(value)
+    serialized = "[" + ", ".join(f'"{v}"' for v in current) + "]"
+    _update_top_level_field(status_file, field, serialized)
 
 
 # ── Prompt / agent installer ─────────────────────────────────
@@ -588,6 +966,563 @@ def cmd_status_update(args: list[str]) -> None:
         print(f"  {stage_key}.{field} = {value}")
     
     print(f"\u2705 Updated {stage_key} in status.yml")
+
+
+# ── cmd_phase_update ──────────────────────────────────────────
+
+def cmd_phase_update(args: list[str]) -> None:
+    """Update phase status within a stage.
+    
+    Usage: intent-first phase-update <ID> <STAGE> <PHASE> --status <STATUS> [--started-at auto] [--completed-at auto]
+    """
+    if len(args) < 5:
+        print("Usage: intent-first phase-update <ID> <STAGE> <PHASE> --status <STATUS>")
+        sys.exit(1)
+
+    wid, stage_input, phase_name = args[0], args[1], args[2]
+    validate_workflow_id(wid)
+
+    stage_key = resolve_stage_key(stage_input)
+    if not stage_key:
+        print(f"\u274c Unknown stage: {stage_input}")
+        sys.exit(1)
+
+    # Validate phase exists for this stage
+    valid_phases = STAGE_PHASES.get(stage_key, [])
+    if phase_name not in valid_phases:
+        print(f"\u274c Unknown phase '{phase_name}' for stage '{stage_key}'")
+        print(f"   Valid phases: {', '.join(valid_phases)}")
+        sys.exit(1)
+
+    # Parse --field value pairs
+    updates: dict[str, str] = {}
+    i = 3
+    while i < len(args):
+        if args[i].startswith("--"):
+            field_name = args[i][2:].replace("-", "_")
+            if i + 1 >= len(args):
+                print(f"\u274c Missing value for --{field_name}")
+                sys.exit(1)
+            updates[field_name] = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if "status" not in updates:
+        print("\u274c --status is required")
+        sys.exit(1)
+
+    valid_statuses = ("pending", "in_progress", "complete", "skipped")
+    if updates["status"] not in valid_statuses:
+        print(f"\u274c Invalid status: {updates['status']}")
+        print(f"   Valid: {', '.join(valid_statuses)}")
+        sys.exit(1)
+
+    status_file = WORKFLOW_DIR / wid / "status.yml"
+    if not status_file.is_file():
+        print(f"\u274c Workflow not found: {WORKFLOW_DIR / wid}")
+        sys.exit(1)
+
+    # Auto-fill timestamps
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for tf in ("started_at", "completed_at"):
+        if tf in updates and updates[tf] == "auto":
+            updates[tf] = ts
+
+    for field, value in updates.items():
+        _update_phase_field(status_file, stage_key, phase_name, field, value)
+
+    # Also update current_phase on the stage
+    update_stage_field(status_file, stage_key, "current_phase", phase_name)
+
+    print(f"\u2705 {stage_key}/{phase_name}: status={updates['status']}")
+
+
+# ── cmd_phase_list ────────────────────────────────────────────
+
+def cmd_phase_list(args: list[str]) -> None:
+    """List all phases and their statuses for a stage."""
+    if len(args) < 2:
+        print("Usage: intent-first phase-list <ID> <STAGE>")
+        sys.exit(1)
+
+    wid, stage_input = args[0], args[1]
+    validate_workflow_id(wid)
+
+    stage_key = resolve_stage_key(stage_input)
+    if not stage_key:
+        print(f"\u274c Unknown stage: {stage_input}")
+        sys.exit(1)
+
+    phases = STAGE_PHASES.get(stage_key, [])
+    if not phases:
+        print(f"No phases defined for stage '{stage_key}'")
+        return
+
+    status_file = WORKFLOW_DIR / wid / "status.yml"
+    print(f"Phases for {stage_key} (workflow {wid}):")
+    print()
+    _STATUS_ICONS = {"pending": "\u2b1c", "in_progress": "\u23f3", "complete": "\u2705", "skipped": "\u23ed\ufe0f"}
+    for p in phases:
+        st = _read_phase_status(status_file, stage_key, p) if status_file.is_file() else "pending"
+        if not st:
+            st = "pending"
+        icon = _STATUS_ICONS.get(st, "\u2753")
+        print(f"  {icon} {p}: {st}")
+
+
+# ── cmd_graph ─────────────────────────────────────────────────
+
+def cmd_graph(args: list[str]) -> None:
+    """Execution graph management commands."""
+    if len(args) < 2:
+        print("Usage: intent-first graph <create|show|ready|update|validate> <ID> [...]")
+        sys.exit(1)
+
+    subcmd = args[0]
+    wid = args[1]
+    validate_workflow_id(wid)
+
+    gpath = _graph_path(wid)
+
+    if subcmd == "create":
+        if gpath.exists():
+            print(f"\u274c Graph already exists: {gpath}")
+            sys.exit(1)
+        g = ExecutionGraph()
+        # Create with empty nodes — agents populate it
+        gpath.parent.mkdir(parents=True, exist_ok=True)
+        g.save(gpath)
+        print(f"\u2705 Created execution graph \u2192 {gpath}")
+
+    elif subcmd == "show":
+        if not gpath.is_file():
+            print(f"\u274c No execution graph found: {gpath}")
+            print(f"   Create one with: intent-first graph create {wid}")
+            sys.exit(1)
+        g = ExecutionGraph.load(gpath)
+        if not g.nodes:
+            print("(empty graph — no nodes defined)")
+            return
+        summary = g.progress_summary()
+        total = sum(summary.values())
+        complete = summary.get("complete", 0)
+        print(f"Execution Graph: {wid} ({complete}/{total} complete)")
+        print()
+        dm = g.depth_map()
+        _STATUS_ICONS_G = {"pending": "\u2b1c", "in_progress": "\u23f3", "complete": "\u2705", "failed": "\u274c", "blocked": "\U0001f6ab"}
+        # Group by depth level
+        levels: dict[int, list[dict]] = {}
+        for n in g.nodes:
+            d = dm.get(n["id"], 0)
+            levels.setdefault(d, []).append(n)
+        for depth in sorted(levels.keys()):
+            for n in levels[depth]:
+                icon = _STATUS_ICONS_G.get(n.get("status", "pending"), "\u2753")
+                deps = ", ".join(n.get("depends_on", [])) or "(none)"
+                pad = "  " * depth
+                print(f"  {pad}{icon} {n['id']}: {n.get('name', '')}  [deps: {deps}]")
+        print()
+        print(f"  Parallelism: effective={g.parallelism.get('effective', 1)}")
+
+    elif subcmd == "ready":
+        if not gpath.is_file():
+            print(f"\u274c No execution graph found: {gpath}")
+            sys.exit(1)
+        g = ExecutionGraph.load(gpath)
+        ready = g.ready_nodes()
+        if not ready:
+            print("No nodes ready for execution.")
+            summary = g.progress_summary()
+            if summary.get("failed", 0) > 0:
+                print("  (some nodes are failed — resolve them first)")
+            elif summary.get("in_progress", 0) > 0:
+                print("  (some nodes are in progress)")
+            elif all(n.get("status") == "complete" for n in g.nodes):
+                print("  (all nodes complete!)")
+            return
+        print("Ready nodes:")
+        for n in ready:
+            print(f"  \u2192 {n['id']}: {n.get('name', '')}")
+
+    elif subcmd == "update":
+        if not gpath.is_file():
+            print(f"\u274c No execution graph found: {gpath}")
+            sys.exit(1)
+        if len(args) < 3:
+            print("Usage: intent-first graph update <ID> <NODE_ID> --status <STATUS>")
+            sys.exit(1)
+        node_id = args[2]
+        # Parse flags
+        updates: dict[str, str] = {}
+        i = 3
+        while i < len(args):
+            if args[i].startswith("--"):
+                field = args[i][2:].replace("-", "_")
+                if i + 1 >= len(args):
+                    print(f"\u274c Missing value for --{field}")
+                    sys.exit(1)
+                updates[field] = args[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        g = ExecutionGraph.load(gpath)
+        nm = g._node_map()
+        if node_id not in nm:
+            print(f"\u274c Unknown node: {node_id}")
+            print(f"   Known nodes: {', '.join(nm.keys())}")
+            sys.exit(1)
+
+        status_val = updates.get("status", "")
+        if status_val == "in_progress":
+            g.start_node(node_id)
+        elif status_val == "complete":
+            g.complete_node(node_id)
+        elif status_val == "failed":
+            g.fail_node(node_id)
+        elif status_val == "pending":
+            g.reset_node(node_id)
+        else:
+            print(f"\u274c Invalid status: {status_val}")
+            print("   Valid: pending, in_progress, complete, failed")
+            sys.exit(1)
+        g.save(gpath)
+        print(f"\u2705 {node_id}: {status_val}")
+
+    elif subcmd == "validate":
+        if not gpath.is_file():
+            print(f"\u274c No execution graph found: {gpath}")
+            sys.exit(1)
+        g = ExecutionGraph.load(gpath)
+        issues = g.validate()
+        if issues:
+            print("Graph validation issues:")
+            for issue in issues:
+                print(f"  \u274c {issue}")
+            sys.exit(1)
+        else:
+            total = len(g.nodes)
+            print(f"\u2705 Graph valid ({total} node{'s' if total != 1 else ''})")
+
+    else:
+        print(f"\u274c Unknown graph subcommand: {subcmd}")
+        print("   Valid: create, show, ready, update, validate")
+        sys.exit(1)
+
+
+# ── cmd_configure ─────────────────────────────────────────────
+
+def cmd_configure(args: list[str]) -> None:
+    """Set or get user preferences.
+    
+    Usage:
+      intent-first configure --name "Your Name"
+      intent-first configure --max-parallelism 3
+      intent-first configure --get name
+    """
+    if not args:
+        # Show current config
+        cfg = _read_config()
+        if not cfg:
+            print("No configuration set. Use:")
+            print('  intent-first configure --name "Your Name"')
+            return
+        for k, v in cfg.items():
+            print(f"  {k}: {v}")
+        return
+
+    # Handle --get
+    if args[0] == "--get":
+        if len(args) < 2:
+            print("\u274c Missing key. Usage: intent-first configure --get name")
+            sys.exit(1)
+        val = get_config_value(args[1])
+        if val:
+            print(val)
+        else:
+            sys.exit(1)
+        return
+
+    # Parse --key value pairs
+    cfg = _read_config()
+    i = 0
+    while i < len(args):
+        if args[i].startswith("--"):
+            key = args[i][2:].replace("-", "_")
+            if i + 1 >= len(args):
+                print(f"\u274c Missing value for --{key}")
+                sys.exit(1)
+            cfg[key] = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    _write_config(cfg)
+    print("\u2705 Configuration updated:")
+    for k, v in cfg.items():
+        print(f"  {k}: {v}")
+
+
+# ── cmd_spawn ─────────────────────────────────────────────────
+
+def cmd_spawn(args: list[str]) -> None:
+    """Create a child workflow linked to a parent.
+    
+    Usage: intent-first spawn <PARENT_ID> <NEW_NAME> [--intent "text"]
+    """
+    if len(args) < 2:
+        print("Usage: intent-first spawn <PARENT_ID> <NEW_NAME> [--intent \"text\"]")
+        sys.exit(1)
+
+    parent_id = args[0]
+    new_name = args[1]
+    validate_workflow_id(parent_id)
+    validate_workflow_id(new_name)
+
+    # Parse optional --intent
+    intent_text = ""
+    i = 2
+    while i < len(args):
+        if args[i] == "--intent" and i + 1 < len(args):
+            intent_text = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    parent_dir = WORKFLOW_DIR / parent_id
+    if not parent_dir.is_dir():
+        print(f"\u274c Parent workflow not found: {parent_dir}")
+        sys.exit(1)
+
+    # Create the new workflow
+    cmd_new([new_name])
+
+    child_dir = WORKFLOW_DIR / new_name
+    child_status = child_dir / "status.yml"
+
+    # Set parent_workflow and spawned_from_stage on child
+    _update_top_level_field(child_status, "parent_workflow", parent_id)
+    _update_top_level_field(child_status, "spawned_from_stage", "artifacts")
+
+    # Add to parent's spawned_workflows
+    parent_status = parent_dir / "status.yml"
+    _append_list_field(parent_status, "spawned_workflows", new_name)
+
+    # Write intent if provided
+    if intent_text:
+        intent_file = child_dir / "s1_intent.md"
+        intent_file.write_text(f"# Intent\n\n{intent_text}\n")
+        info(f"Wrote intent to {intent_file}")
+
+    print(f"\u2705 Spawned workflow '{new_name}' from parent '{parent_id}'")
+
+
+# ── cmd_link ──────────────────────────────────────────────────
+
+def cmd_link(args: list[str]) -> None:
+    """Link two workflows.
+    
+    Usage: intent-first link <ID1> <ID2> [--relation follows|blocks|related]
+    """
+    if len(args) < 2:
+        print("Usage: intent-first link <ID1> <ID2> [--relation follows|blocks|related]")
+        sys.exit(1)
+
+    id1, id2 = args[0], args[1]
+    validate_workflow_id(id1)
+    validate_workflow_id(id2)
+
+    relation = "related"
+    i = 2
+    while i < len(args):
+        if args[i] == "--relation" and i + 1 < len(args):
+            relation = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if relation not in ("follows", "blocks", "related"):
+        print(f"\u274c Invalid relation: {relation}")
+        print("   Valid: follows, blocks, related")
+        sys.exit(1)
+
+    for wid in (id1, id2):
+        if not (WORKFLOW_DIR / wid).is_dir():
+            print(f"\u274c Workflow not found: {WORKFLOW_DIR / wid}")
+            sys.exit(1)
+
+    # Store the link in both status files
+    s1 = WORKFLOW_DIR / id1 / "status.yml"
+    s2 = WORKFLOW_DIR / id2 / "status.yml"
+    _append_list_field(s1, "linked_workflows", f"{id2}:{relation}")
+    _append_list_field(s2, "linked_workflows", f"{id1}:{relation}")
+
+    print(f"\u2705 Linked {id1} \u2194 {id2} ({relation})")
+
+
+# ── cmd_status ────────────────────────────────────────────────
+
+_STATUS_ICONS_STAGE = {
+    "draft": "\U0001f4a1",
+    "pending": "\u2b1c",
+    "in_progress": "\u23f3",
+    "approved": "\u2705",
+    "locked": "\U0001f512",
+    "complete": "\u2705",
+}
+
+
+def cmd_status(args: list[str]) -> None:
+    """Show workflow status.
+    
+    Usage:
+      intent-first status                    # all workflows
+      intent-first status --workflow <ID>     # one workflow in detail
+    """
+    # Parse --workflow flag
+    target_wid = ""
+    i = 0
+    while i < len(args):
+        if args[i] == "--workflow" and i + 1 < len(args):
+            target_wid = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if target_wid:
+        validate_workflow_id(target_wid)
+        _status_single(target_wid)
+    else:
+        _status_all()
+
+
+def _status_all() -> None:
+    """Show all workflows with relationships."""
+    if not WORKFLOW_DIR.is_dir():
+        print("No workflows yet. Run: intent-first new")
+        return
+
+    workflows = _sorted_workflows()
+    if not workflows:
+        print("No workflows found.")
+        return
+
+    print(f"{'ID':<15} {'TITLE':<30} {'STAGE':<15} PARENT")
+    print(f"{'---':<15} {'---':<30} {'---':<15} ---")
+
+    for d in workflows:
+        wid = d.name
+        title = "(untitled)"
+        intent_file = d / "s1_intent.md"
+        if intent_file.is_file():
+            for line in intent_file.read_text().splitlines():
+                m = re.match(r"^# Intent:\s*(.*)", line)
+                if m:
+                    title = m.group(1).strip()
+                    break
+
+        status_file = d / "status.yml"
+        display_status = "\U0001f4a1 intent"
+        parent = ""
+        if status_file.is_file():
+            a = get_stage_status(status_file, "artifacts")
+            e = get_stage_status(status_file, "execution")
+            p = get_stage_status(status_file, "plan")
+            s = get_stage_status(status_file, "spec")
+            if a in ("complete", "locked"):
+                display_status = "\u2705 complete"
+            elif e == "in_progress":
+                display_status = "\u2699\ufe0f  executing"
+            elif p in ("locked", "approved"):
+                display_status = "\U0001f4cb planned"
+            elif s in ("locked", "approved"):
+                display_status = "\U0001f4d0 specified"
+            parent = _read_top_level_field(status_file, "parent_workflow")
+
+        parent_str = f"\u2190 {parent}" if parent else ""
+        print(f"{wid:<15} {title[:30]:<30} {display_status:<15} {parent_str}")
+
+
+def _status_single(wid: str) -> None:
+    """Detailed status of one workflow."""
+    wdir = WORKFLOW_DIR / wid
+    if not wdir.is_dir():
+        print(f"\u274c Workflow not found: {wdir}")
+        sys.exit(1)
+
+    status_file = wdir / "status.yml"
+    title = "(untitled)"
+    intent_file = wdir / "s1_intent.md"
+    if intent_file.is_file():
+        for line in intent_file.read_text().splitlines():
+            m = re.match(r"^# Intent:\s*(.*)", line)
+            if m:
+                title = m.group(1).strip()
+                break
+
+    print(f"{BOLD}Workflow: {wid}{RESET}")
+    print(f"  Title: {title}")
+
+    if status_file.is_file():
+        parent = _read_top_level_field(status_file, "parent_workflow")
+        spawned = _read_list_field(status_file, "spawned_workflows")
+        if parent:
+            print(f"  Parent: {parent}")
+        if spawned:
+            print(f"  Spawned: {', '.join(spawned)}")
+
+    # Stage progression bar
+    stages = ["intent", "spec", "plan", "execution", "artifacts"]
+    stage_statuses = []
+    for st in stages:
+        s = get_stage_status(status_file, st) if status_file.is_file() else "pending"
+        if not s:
+            s = "pending"
+        stage_statuses.append(s)
+
+    print()
+    print("  Stages:")
+    for st, ss in zip(stages, stage_statuses):
+        icon = _STATUS_ICONS_STAGE.get(ss, "\u2b1c")
+        print(f"    {icon} {st}: {ss}")
+
+    # Phase details for active stage
+    active_stage = ""
+    for st, ss in zip(stages, stage_statuses):
+        if ss in ("in_progress", "draft"):
+            active_stage = st
+            break
+    if not active_stage:
+        for st, ss in zip(stages, stage_statuses):
+            if ss == "pending":
+                active_stage = st
+                break
+
+    if active_stage and active_stage in STAGE_PHASES:
+        phases = STAGE_PHASES[active_stage]
+        print(f"\n  Phases ({active_stage}):")
+        _PHASE_ICONS = {"pending": "\u2b1c", "in_progress": "\u23f3", "complete": "\u2705", "skipped": "\u23ed\ufe0f"}
+        for p in phases:
+            ps = _read_phase_status(status_file, active_stage, p) if status_file.is_file() else "pending"
+            if not ps:
+                ps = "pending"
+            icon = _PHASE_ICONS.get(ps, "\u2753")
+            print(f"    {icon} {p}: {ps}")
+
+    # Execution graph summary
+    gpath = _graph_path(wid)
+    if gpath.is_file():
+        g = ExecutionGraph.load(gpath)
+        if g.nodes:
+            summary = g.progress_summary()
+            total = sum(summary.values())
+            complete = summary.get("complete", 0)
+            pct = int(100 * complete / total) if total > 0 else 0
+            print(f"\n  Execution Graph: {complete}/{total} ({pct}%)")
+            ready = g.ready_nodes()
+            if ready:
+                print(f"    Ready: {', '.join(n['id'] for n in ready)}")
 
 
 # ── cmd_validate ──────────────────────────────────────────────
@@ -915,18 +1850,49 @@ def cmd_upgrade(_args: list[str]) -> None:
         print()
         print(f"{GREEN}\u2705 Upgraded to {latest}{RESET}")
         print()
-        print("  Major changes in this version:")
-        print("    • Agents now write directly to workflow files (no Workflow Updater agent)")
-        print("    • Write-to-file mandate: all thinking must appear in workflow files")
-        print("    • Interactive tool selection if none detected during init")
+        print(f"  {BOLD}What's New in v2.0:{RESET}")
+        print()
+        print(f"  {CYAN}Phase-Driven Stages{RESET}")
+        print("    • Every stage now has sequential phases tracked in status.yml")
+        print("    • Spec: codebase-explore → intent-mapping → intent-lock → research → spec-drafting → spec-iteration → spec-lock")
+        print("    • Plan: execution-graph-draft → plan-iteration → execution-graph-finalization → plan-lock")
+        print("    • New commands: phase-update, phase-list")
+        print()
+        print(f"  {CYAN}Execution Graph (DAG Engine){RESET}")
+        print("    • Plan stage creates an execution graph (dependency DAG) for the execution stage")
+        print("    • Nodes are executed in dependency order with parallelism support")
+        print("    • New commands: graph create, graph show, graph ready, graph update, graph validate")
+        print()
+        print(f"  {CYAN}Workflow Relationships{RESET}")
+        print("    • Workflows can now be spawned from other workflows (parent→child)")
+        print("    • Manual linking with relation types (follows, blocks, related)")
+        print("    • New commands: spawn, link")
+        print()
+        print(f"  {CYAN}User Configuration{RESET}")
+        print("    • Store your preferred name: intent-first configure --name \"Your Name\"")
+        print("    • Agents use this instead of git config (saves tokens)")
+        print()
+        print(f"  {CYAN}Enhanced Status Display{RESET}")
+        print("    • New: intent-first status [--workflow <ID>] — detailed stage/phase/graph view")
+        print("    • Shows stage progression, phase breakdown, graph progress, workflow tree")
+        print()
+        print(f"  {CYAN}NO DEFER Rule (Rule #7){RESET}")
+        print("    • No task may be deferred without explicit [APPROVED-DEFER: name timestamp] tag")
+        print("    • Auditor now checks for untagged TODOs, deferred items, and placeholders")
+        print()
+        print(f"  {CYAN}Backward Compatibility{RESET}")
+        print("    • Existing v1.x workflows (without phases/graphs) continue to work")
+        print("    • New features are additive — phase tracking and graphs are optional")
     else:
         print()
         print(f"{GREEN}\u2705 Everything refreshed ({current}){RESET}")
     print()
-    print("  \U0001f4cb Next steps:")
+    print(f"  {BOLD}\U0001f4cb Post-upgrade steps:{RESET}")
     print("     1. Run in each project: intent-first init")
     print("     2. .intent-first/rules.md will be updated with latest rules")
     print("     3. Prompts and agents in your tool dirs will be refreshed")
+    print("     4. Set your preferred name: intent-first configure --name \"Your Name\"")
+    print("     5. Existing workflows will continue to work without changes")
 
 
 # ── cmd_implode ───────────────────────────────────────────────
@@ -1042,7 +2008,7 @@ def main() -> None:
     args = sys.argv[1:]
     cmd  = args[0] if args else "help"
 
-    if cmd not in ("upgrade", "help", "--help", "-h", "implode"):
+    if cmd not in ("upgrade", "help", "--help", "-h", "implode", "configure"):
         check_latest_version()
 
     dispatch = {
@@ -1051,6 +2017,13 @@ def main() -> None:
         "lock":           lambda: cmd_lock(args[1:]),
         "unlock":         lambda: cmd_unlock(args[1:]),
         "status-update":  lambda: cmd_status_update(args[1:]),
+        "phase-update":   lambda: cmd_phase_update(args[1:]),
+        "phase-list":     lambda: cmd_phase_list(args[1:]),
+        "graph":          lambda: cmd_graph(args[1:]),
+        "configure":      lambda: cmd_configure(args[1:]),
+        "spawn":          lambda: cmd_spawn(args[1:]),
+        "link":           lambda: cmd_link(args[1:]),
+        "status":         lambda: cmd_status(args[1:]),
         "validate":       lambda: cmd_validate(args[1:]),
         "list":           lambda: cmd_list(args[1:]),
         "upgrade":        lambda: cmd_upgrade(args[1:]),
