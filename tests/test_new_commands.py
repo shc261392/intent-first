@@ -900,8 +900,7 @@ stages:
         template_dir = Path(__file__).parent.parent / "templates"
         template_status = template_dir / "status.yml"
         if template_status.is_file():
-            import shutil as _shutil
-            _shutil.copy(template_status, wf2_dir / "status.yml")
+            shutil.copy(template_status, wf2_dir / "status.yml")
         else:
             (wf2_dir / "status.yml").write_text('workflow_id: "v2-workflow"\nstages:\n  spec:\n    status: pending\n')
         for f in ["s1_intent.md", "s2_spec.md"]:
