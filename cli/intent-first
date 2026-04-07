@@ -542,14 +542,8 @@ class ExecutionGraph:
     def topological_order(self) -> list[str]:
         """Kahn's algorithm for topological sort."""
         nm = self._node_map()
-        in_deg: dict[str, int] = {nid: 0 for nid in nm}
-        for n in self.nodes:
-            for d in n.get("depends_on", []):
-                if d in in_deg:
-                    # d is depended upon BY n, so n has an incoming edge
-                    pass
-            # Count incoming edges (how many nodes depend on this one? No — in_deg counts deps of this node)
-        # Re-count properly: in_degree[n] = len(n.depends_on that exist)
+        # in_degree[n] = number of n's dependencies that exist in the graph
+        in_deg: dict[str, int] = {}
         for n in self.nodes:
             in_deg[n["id"]] = len([d for d in n.get("depends_on", []) if d in nm])
         queue: list[str] = [nid for nid, deg in in_deg.items() if deg == 0]
@@ -1318,7 +1312,7 @@ def cmd_spawn(args: list[str]) -> None:
     # Write intent if provided
     if intent_text:
         intent_file = child_dir / "s1_intent.md"
-        intent_file.write_text(f"# Intent: {intent_text}\n\n{intent_text}\n")
+        intent_file.write_text(f"# Intent\n\n{intent_text}\n")
         info(f"Wrote intent to {intent_file}")
 
     print(f"\u2705 Spawned workflow '{new_name}' from parent '{parent_id}'")

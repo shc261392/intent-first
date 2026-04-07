@@ -27,6 +27,7 @@ class CLITestBase(unittest.TestCase):
 
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix="intent-first-test-")
+        self.addCleanup(shutil.rmtree, self.test_dir, ignore_errors=True)
         self.workflow_id = "test-1"
         self.workflow_dir = Path(self.test_dir) / "workflows" / self.workflow_id
         self.workflow_dir.mkdir(parents=True, exist_ok=True)
