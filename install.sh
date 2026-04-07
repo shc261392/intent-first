@@ -358,6 +358,7 @@ install_cli() {
 
 header "🎯 Intent-First Workflow Installer"
 echo "   https://github.com/$REPO"
+echo "   Primary support: VSCode GitHub Copilot extension & Copilot CLI"
 echo ""
 
 OS=$(detect_os)

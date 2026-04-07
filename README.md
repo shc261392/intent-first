@@ -6,7 +6,9 @@
 
 **A lightweight local protocol that stops AI agents from guessing.**
 
-Markdown files + a tiny CLI. Zero dependencies. Works with any AI coding tool.
+Markdown files + a tiny CLI. Zero dependencies.
+
+> **Primary support:** VSCode GitHub Copilot extension and GitHub Copilot CLI. Other AI coding tools are community-supported but not actively tested.
 
 **Intent → Spec → Plan → Execute → Artifacts**
 
@@ -140,6 +142,7 @@ Installed automatically into your AI tool's config:
 | **Decision tracking** | Who decided, when, and why |
 | **100% plan compliance** | Deviations need your explicit approval |
 | **No reversal** | Locked stages are immutable — start a new workflow instead |
+| **No defer / no unfinished** | No task may be deferred or delivered incomplete without explicit named approval |
 
 ## YOLO Mode
 
@@ -160,6 +163,10 @@ intent-first lock <ID> <STAGE>     # Lock stage file (chmod read-only)
 intent-first unlock <ID> <STAGE>   # Unlock stage file
 intent-first validate [ID]         # Check workflow integrity
 intent-first list                  # Show all workflows with status
+intent-first status [--workflow ID] # Detailed workflow status display
+intent-first configure --name "N"  # Set your preferred display name
+intent-first graph show <ID>       # Show execution graph for a workflow
+intent-first spawn <PID> <NAME>    # Create a child workflow linked to parent
 intent-first implode               # Remove all intent-first files
 intent-first help                  # Show help
 ```
@@ -184,7 +191,7 @@ Stages: `intent`, `spec`, `plan`, `execution`, `artifacts` (or `1`–`5`).
 
 <details>
 <summary><b>Does this work with my AI tool?</b></summary>
-If it reads markdown instruction files, yes. The installer covers Copilot, Cursor, Claude Code, Windsurf, Aider, Cline, and Antigravity. For others, copy <code>rules/RULES.md</code> into your tool's config.
+Intent-First is primarily tested with <b>VSCode GitHub Copilot extension</b> and <b>GitHub Copilot CLI</b>. The installer also covers Cursor, Claude Code, Windsurf, Aider, Cline, and Antigravity as community-supported but not actively tested. For other tools, copy <code>rules/RULES.md</code> into your tool's config.
 </details>
 
 <details>

@@ -78,6 +78,7 @@ Intent → Spec → Plan → Execution → Artifacts
 4. **Decision tracking**: All decisions must record datetime (UTC) and decision maker
 5. **No reversal**: Locked stages are immutable. Create new workflow if major changes needed
 6. **100% plan compliance**: During execution, any deviation requires documented human approval
+7. **No defer / no unfinished**: No stage, phase, or task may be deferred or delivered incomplete without explicit user approval including approver name and timestamp. Even in YOLO mode, deferring or delivering unfinished work is a critical rule violation. If a blocker exists, use askQuestion immediately to propose alternatives and get named approval (`[APPROVED-DEFER: <name> <timestamp>]`) before proceeding.
 
 ### Confidence Scoring Model
 
@@ -146,3 +147,23 @@ Agents use these prompts to work on each stage:
 - `/wf-yolo <ID>` — Run all stages with auto-approval at ≥85% confidence
 
 For detailed stage instructions, read the corresponding prompt file in the `prompts/` directory (or `.github/prompts/`, `.cursor/prompts/`, etc. depending on your tool).
+
+### Stage Phases
+
+Each stage is broken into sequential phases. Agents track phase progress using `intent-first phase-update <ID> <STAGE> <PHASE> --status <STATUS>`.
+
+**Spec phases**: `codebase-explore` → `intent-mapping` → `intent-lock` → `research` → `spec-drafting` → `spec-iteration` → `spec-lock`
+
+**Plan phases**: `execution-graph-draft` → `plan-iteration` → `execution-graph-finalization` → `plan-lock`
+
+**Execution phases**: Dynamic graph nodes (from `execution-graph.yml`) → `execution-iteration` → `execution-lock`
+
+**Artifacts phases**: `artifacts-iteration` → `new-workflow-spawning` → `artifacts-lock`
+
+### Execution Graph
+
+During the plan stage, agents create an execution graph (`execution-graph.yml`) that defines a DAG of work nodes with dependencies. During execution, agents follow this graph using `intent-first graph` commands. Run `intent-first graph show <ID>` to view graph status.
+
+### User Configuration
+
+Run `intent-first configure --name "Your Name"` to set your preferred display name. Agents use `intent-first configure --get name` to retrieve it for approvals (instead of `git config`). Run `intent-first configure --max-parallelism <N>` to cap execution graph parallelism.
