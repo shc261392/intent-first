@@ -735,5 +735,192 @@ class TestBackwardCompatibility(CLITestBase):
         self.assertEqual(ec, 0, f"stderr: {err}")
 
 
+class TestUpgradeFromV1(CLITestBase):
+    """Test upgrading from v1.x (old status.yml without phases/metadata) to v2.0.
+
+    v1.x status.yml has no phases, no workflow_id, no parent_workflow, no
+    spawned_workflows, no linked_workflows, no tags, no priority fields.
+    All v2.0 commands should either work gracefully or fail with a helpful message.
+    """
+
+    V1_STATUS_YML = """\
+# Intent-First Workflow Status
+# Updated automatically by agents at each stage transition.
+# Do not edit manually unless resolving a stuck state.
+# See .intent-first/rules.md for valid status values and transition rules.
+
+workflow_id: ""
+
+stages:
+  intent:
+    status: draft       # draft | locked
+    locked_at: ""       # ISO 8601 UTC
+
+  spec:
+    status: pending     # pending | draft | approved | locked
+    approved_by: ""     # human name
+    approved_at: ""     # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+
+  plan:
+    status: pending     # pending | draft | approved | locked
+    derived_from: "s2_spec.md"
+    approved_by: ""     # human name
+    approved_at: ""     # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+
+  execution:
+    status: pending     # pending | in_progress | complete | locked
+    started_at: ""      # ISO 8601 UTC
+    completed_at: ""    # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+
+  artifacts:
+    status: pending     # pending | draft | complete | locked
+    completed_at: ""    # ISO 8601 UTC
+    locked_at: ""       # ISO 8601 UTC
+"""
+
+    def _setup_v1_workflow(self):
+        """Replace the default v2.0 status.yml with a v1.x format."""
+        status_yml = self.workflow_dir / "status.yml"
+        status_yml.write_text(self.V1_STATUS_YML)
+        return status_yml
+
+    def test_v1_status_update_still_works(self):
+        """Core v1.x command: status-update should work on old format."""
+        self._setup_v1_workflow()
+        ec, out, err = self._run_cli([
+            "status-update", self.workflow_id, "spec", "--status", "approved"
+        ])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        # Verify the update was applied
+        content = (self.workflow_dir / "status.yml").read_text()
+        self.assertIn('"approved"', content)
+
+    def test_v1_lock_still_works(self):
+        """Core v1.x command: lock should work on old format."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+        ec, out, err = self._run_cli(["lock", self.workflow_id, "spec"])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+
+    def test_v1_unlock_still_works(self):
+        """Core v1.x command: unlock should work on old format."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+        # Lock first, then unlock
+        self._run_cli(["lock", self.workflow_id, "spec"])
+        ec, out, err = self._run_cli(["unlock", self.workflow_id, "spec"])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+
+    def test_v1_validate_still_works(self):
+        """Core v1.x command: validate should work on old format."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+        ec, out, err = self._run_cli(["validate", self.workflow_id])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+
+    def test_v1_list_still_works(self):
+        """Core v1.x command: list should work on old format."""
+        self._setup_v1_workflow()
+        ec, out, err = self._run_cli(["list"])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        self.assertIn(self.workflow_id, out)
+
+    def test_v1_status_command_works(self):
+        """New v2.0 status command should work gracefully with v1.x format."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+        ec, out, err = self._run_cli(["status"])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        self.assertIn(self.workflow_id, out)
+
+    def test_v1_status_workflow_detail_works(self):
+        """New v2.0 status --workflow should work gracefully with v1.x format."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+        ec, out, err = self._run_cli(["status", "--workflow", self.workflow_id])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        self.assertIn("Workflow:", out)
+
+    def test_v1_phase_list_graceful_on_no_phases(self):
+        """phase-list should handle v1.x status.yml that has no phases block."""
+        self._setup_v1_workflow()
+        ec, out, err = self._run_cli(["phase-list", self.workflow_id, "spec"])
+        # Should succeed with 0 exit code (empty or shows "no phases" message)
+        # or fail gracefully with non-zero (phase data not found)
+        # Either is acceptable — what matters is no crash/traceback
+        self.assertNotIn("Traceback", err, "Should not crash with traceback")
+
+    def test_v1_phase_update_graceful_on_no_phases(self):
+        """phase-update should handle v1.x status.yml that has no phases block."""
+        self._setup_v1_workflow()
+        ec, out, err = self._run_cli([
+            "phase-update", self.workflow_id, "spec", "codebase-explore",
+            "--status", "in_progress"
+        ])
+        # Should fail gracefully (phase block not found in v1 format)
+        # What matters is no crash/traceback
+        self.assertNotIn("Traceback", err, "Should not crash with traceback")
+
+    def test_v1_graph_commands_work_without_graph(self):
+        """Graph commands should fail gracefully when no execution-graph.json exists."""
+        self._setup_v1_workflow()
+        ec, out, err = self._run_cli(["graph", "show", self.workflow_id])
+        # Should fail gracefully (no graph file exists)
+        self.assertNotIn("Traceback", err, "Should not crash with traceback")
+
+    def test_v1_spawn_preserves_old_workflow(self):
+        """Spawning from a v1.x parent should work and not corrupt parent status.yml."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+        original_content = (self.workflow_dir / "status.yml").read_text()
+        ec, out, err = self._run_cli([
+            "spawn", self.workflow_id, "child-from-v1"
+        ])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        # Check child was created
+        child_dir = Path(self.test_dir) / "workflows" / "child-from-v1"
+        self.assertTrue(child_dir.is_dir())
+        # Check parent status.yml was not corrupted (still parseable)
+        parent_status = (self.workflow_dir / "status.yml").read_text()
+        self.assertIn("stages:", parent_status)
+        self.assertIn("spec:", parent_status)
+
+    def test_v1_mixed_workflows_in_list(self):
+        """list/status commands should handle a mix of v1 and v2 workflows."""
+        self._setup_v1_workflow()
+        self._create_stage_files()
+
+        # Create a second workflow with v2 format (the default)
+        wf2_dir = Path(self.test_dir) / "workflows" / "v2-workflow"
+        wf2_dir.mkdir(parents=True, exist_ok=True)
+        # Use the v2 template (already has phases)
+        template_dir = Path(__file__).parent.parent / "templates"
+        template_status = template_dir / "status.yml"
+        if template_status.is_file():
+            import shutil as _shutil
+            _shutil.copy(template_status, wf2_dir / "status.yml")
+        else:
+            (wf2_dir / "status.yml").write_text('workflow_id: "v2-workflow"\nstages:\n  spec:\n    status: pending\n')
+        for f in ["s1_intent.md", "s2_spec.md"]:
+            (wf2_dir / f).write_text(f"# {f}\n")
+
+        ec, out, err = self._run_cli(["list"])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        self.assertIn(self.workflow_id, out)
+        self.assertIn("v2-workflow", out)
+
+    def test_v1_configure_independent_of_workflow(self):
+        """configure command should work regardless of workflow format."""
+        self._setup_v1_workflow()
+        ec, out, err = self._run_cli(["configure", "--name", "UpgradeUser"])
+        self.assertEqual(ec, 0, f"stderr: {err}")
+        ec2, out2, err2 = self._run_cli(["configure", "--get", "name"])
+        self.assertEqual(ec2, 0, f"stderr: {err2}")
+        self.assertIn("UpgradeUser", out2.strip())
+
+
 if __name__ == "__main__":
     unittest.main()

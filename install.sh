@@ -281,10 +281,10 @@ install_templates() {
     cp -r "$dest" "$bk"; info "Backed up templates → $(basename "$bk")"
   fi
   mkdir -p "$dest"
-  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md status.yml; do
+  for tmpl in s1_intent.md s2_spec.md s3_plan.md s4_execution.md s5_artifacts.md status.yml execution-graph.json; do
     download "$RAW/templates/$tmpl" "$dest/$tmpl"
   done
-  info "Installed 6 templates → $dest/"
+  info "Installed 7 templates → $dest/"
 }
 
 # ── Install CLI (global) ──────────────────────────────────────
