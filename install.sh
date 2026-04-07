@@ -110,7 +110,7 @@ ask_tool_interactive() {
   local reply
   if [ -t 0 ]; then
     read -r reply
-  elif [ -e /dev/tty ]; then
+  elif (: < /dev/tty) 2>/dev/null; then
     read -r reply < /dev/tty
   else
     reply=""  # non-interactive (CI) — use default
@@ -339,7 +339,7 @@ install_cli() {
   # Read from /dev/tty so it works even when script is piped through curl | bash
   if [ -t 0 ]; then
     read -r reply
-  elif [ -e /dev/tty ]; then
+  elif (: < /dev/tty) 2>/dev/null; then
     read -r reply < /dev/tty
   else
     reply=""  # non-interactive (CI) — use default (Y)
