@@ -110,8 +110,10 @@ ask_tool_interactive() {
   local reply
   if [ -t 0 ]; then
     read -r reply
-  else
+  elif [ -e /dev/tty ]; then
     read -r reply < /dev/tty
+  else
+    reply=""  # non-interactive (CI) — use default
   fi
   reply="${reply:-1}"
   local tools=()
@@ -337,8 +339,10 @@ install_cli() {
   # Read from /dev/tty so it works even when script is piped through curl | bash
   if [ -t 0 ]; then
     read -r reply
-  else
+  elif [ -e /dev/tty ]; then
     read -r reply < /dev/tty
+  else
+    reply=""  # non-interactive (CI) — use default (Y)
   fi
 
   case "${reply:-Y}" in
