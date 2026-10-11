@@ -1,25 +1,27 @@
 # Spec: {{id}}
 
-## Overview
-<!-- Each intent item, and the design element that satisfies it. -->
+<!-- WHAT will be true, and WHY this design, seen from outside the code.
+     Reader: the human deciding whether this is the right thing to build.
+     It must stay true even if the implementation approach changes, so no file paths,
+     task order or code: those belong in the plan. -->
 
-## Design Decisions
-<!-- Only decisions that matter. For each: Context / Options / Decision / Why. -->
+## Summary
+<!-- The solution in a few plain sentences. -->
+
+## Behaviour
+<!-- What users, callers or operators observe: flows, states, errors, edge cases. -->
 
 ## Interfaces
-<!-- Public APIs, signatures, data shapes, CLI flags. Contracts, not implementations. "None" if not applicable. -->
+<!-- Contracts others depend on: API shapes, CLI flags, config keys, data formats, events. "None" if not applicable. -->
 
-## Constraints
-<!-- Performance, security, compatibility, edge cases. "None" if not applicable. -->
+## Decisions
+<!-- Choices that shape the result. For each: context, options considered, choice, why. -->
 
-## Quality Gates
-<!-- Measurable checks: test commands, benchmarks, acceptance criteria. -->
-
-## Deliverables
-<!-- One per intent item. No orphans in either direction. -->
-
-## Research Notes
-<!-- Docs and versions the design relies on. Optional. -->
+## Acceptance Criteria
+<!-- Observable, testable statements that prove the goals are met. Each names the goals it serves,
+     and every goal needs at least one:
+- AC1 (G1): Signing in with GitHub creates a session and lands on the dashboard.
+- AC2 (G2): Password sign-in behaves exactly as before. -->
 
 ## Open Questions
 <!-- Anything unresolved. Must be empty (or "None") before approval. -->

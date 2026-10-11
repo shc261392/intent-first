@@ -105,7 +105,7 @@ class UninstallTest(ProjectTestCase):
     def test_purge_removes_everything_even_locked_files(self):
         self.run_cli("init", "--tools", "codex")
         self.run_cli("new", "w")
-        self.write_stage("w", "intent", "# I\n\n## Goal\nx\n")
+        self.write_stage("w", "intent", "# I\n\n## Goals\n- G1: x\n")
         self.run_cli("approve", "w")
         self.run_cli("uninstall", "--yes", "--purge")
         self.assertEqual(sorted(p.name for p in self.root.iterdir()), [".git"])

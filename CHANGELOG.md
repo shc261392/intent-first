@@ -19,12 +19,15 @@ A rewrite for agents that support Agent Skills and hooks. It is **breaking**: wo
 ### Changed
 
 - License: GPL-3.0 → **MIT**.
-- Workflow files: `s1_intent.md`…`s5_artifacts.md` + `status.yml` + `execution-graph.json` → `intent.md`…`artifacts.md` + one `state.json`.
-- Commands: `/wf-spec` etc. → skills `intent-spec`, `intent-plan`, `intent-execute`, `intent-artifacts`, `intent-yolo`, plus the `intent-first` entry skill.
+- **Four stages instead of five:** intent → spec → plan → execution. The artifacts stage is replaced by `report.md`, which the CLI generates when execution is approved (`intent-first report`).
+- **Intent mapping is a thread, not a stage.** Goals are `G1…`; spec acceptance criteria `AC1 (G1)` must cover every goal; each graph node `--covers` criteria, and every criterion needs a node and a Verification line; execution records `AC1: pass — evidence`. `check` enforces every link.
+- **Spec and plan have separate roles.** The spec covers what and why from outside the code (Summary, Behaviour, Interfaces, Decisions, Acceptance Criteria). The plan covers how and in what order from inside it (Approach, `### <node>` Steps, Verification, Risks). `check` notes file paths in the spec, and requires plan steps to match graph nodes 1:1.
+- Workflow files: `s1_intent.md`…`s5_artifacts.md` + `status.yml` + `execution-graph.json` → `intent.md`, `spec.md`, `plan.md`, `execution.md` + one `state.json` (+ generated `report.md`).
+- Commands: `/wf-spec` etc. → skills `intent-spec`, `intent-plan`, `intent-execute`, `intent-yolo`, plus the `intent-first` entry skill.
 - The LLM's self-scored "70% / 85% confidence" gates are replaced by an `## Open Questions` gate that `check` can verify. YOLO approves only while there are no open questions.
-- About 7,500 words of always-loaded rules and prompts → about 90 always-on words plus about 1,900 words of skills that load on demand.
+- About 7,500 words of always-loaded rules and prompts → about 110 always-on words plus about 1,900 words of skills that load on demand.
 - `install.sh` installs only the CLI, from a pinned release, into `~/.local/bin`. It no longer edits shell profiles or projects.
-- `graph update --status X` → `graph set ID NODE X`; `graph create` is gone (graphs live in `state.json`).
+- `graph update --status X` → `graph set ID NODE X`; `graph add` requires `--covers`; `graph create` is gone (graphs live in `state.json`).
 
 ### Removed
 
@@ -44,4 +47,4 @@ intent-first init      # installs v3 skills, AGENTS.md block and hooks
 
 A v2 `intent-first upgrade` now installs a stub that prints these steps.
 
-`migrate` keeps stage approvals that are contiguous from intent (v2 `locked`/`approved`/`complete`), re-hashes those files, and carries over graph nodes and parent/child links.
+`migrate` keeps stage approvals that are contiguous from intent (v2 `locked`/`approved`/`complete`), re-hashes those files, and carries over graph nodes and parent/child links. `s5_artifacts.md` is kept as `v2-artifacts.md`. Migrated content won't have goal and criterion IDs, so stages that are still open must adopt the v3 templates before they can be approved.

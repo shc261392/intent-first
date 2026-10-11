@@ -1,10 +1,18 @@
 # Execution: {{id}}
 
 ## Progress
-<!-- A checklist copied from the plan, ticked as work lands: - [x] node-id: what was done -->
+<!-- One checkbox per graph node, ticked as it lands: - [x] api: callback route and session handling -->
 
-## Timeline
-<!-- Short dated entries, written as you go: what changed, test results, problems. -->
+## Log
+<!-- Short dated notes as you go: what changed, test runs, problems. Optional. -->
 
 ## Deviations
-<!-- Any departure from the plan, with who approved it and when. "None" if there were none. -->
+<!-- Departures from the plan, each with who approved it and when. "None" if there were none. -->
+
+## Results
+<!-- Every acceptance criterion, its result, and the evidence:
+- AC1: pass — `pytest tests/test_login.py -k github` (4 passed)
+- AC2: fail — redirect loop on expired sessions [APPROVED-DEFER: Ann 2026-10-12] -->
+
+## Follow-ups
+<!-- Work this surfaced that belongs in a new workflow, or "None". Optional. -->

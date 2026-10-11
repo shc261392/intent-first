@@ -72,19 +72,47 @@ class ProjectTestCase(unittest.TestCase):
 
 
 GOOD = {
-    "intent": "# Intent\n\n## Goal\nUsers can log in with GitHub.\n",
+    "intent": "# Intent: GitHub login\n\n## Goals\n- G1: Users can log in with GitHub.\n- G2: Password login keeps working.\n",
     "spec": (
-        "# Spec\n\n## Overview\nLogin via OAuth.\n\n## Design Decisions\nUse the provider SDK.\n\n"
-        "## Interfaces\nNone\n\n## Constraints\nNone\n\n## Quality Gates\n- `pytest` passes\n\n"
-        "## Deliverables\n1. Login button\n\n## Open Questions\nNone\n"
+        "# Spec\n\n## Summary\nAdd OAuth login next to passwords.\n\n## Behaviour\nA GitHub button starts OAuth.\n\n"
+        "## Interfaces\nNone\n\n## Decisions\nUse the provider SDK.\n\n"
+        "## Acceptance Criteria\n- AC1 (G1): GitHub login lands on the dashboard.\n- AC2 (G2): Password login is unchanged.\n\n"
+        "## Open Questions\nNone\n"
     ),
     "plan": (
-        "# Plan\n\n## Steps\n### api\nAdd route.\n\n## Files\n- app.py\n\n## Verification\n- pytest\n\n"
+        "# Plan\n\n## Approach\nRoute first, then UI.\n\n## Steps\n### api — callback route\nAdd route in app.py.\n\n"
+        "### ui\nAdd the button.\n\n## Verification\n- AC1: `pytest -k github`\n- AC2: `pytest -k password`\n\n"
         "## Open Questions\n"
     ),
-    "execution": "# Execution\n\n## Progress\n- [x] api: route added\n\n## Deviations\nNone\n",
-    "artifacts": (
-        "# Artifacts\n\n## Summary\nLogin works.\n\n## Changes\n- app.py\n\n## Verification\npytest: 3 passed\n\n"
-        "## Follow-ups\nNone\n"
+    "execution": (
+        "# Execution\n\n## Progress\n- [x] api: route added\n- [x] ui: button added\n\n## Deviations\nNone\n\n"
+        "## Results\n- AC1: pass — `pytest -k github` (3 passed)\n- AC2: pass — `pytest -k password` (5 passed)\n\n"
+        "## Follow-ups\n- Add GitLab login\n"
     ),
 }
+NODES = (("api", "AC1", ""), ("ui", "AC1,AC2", "api"))
+
+
+def add_nodes(case: ProjectTestCase, wid: str) -> None:
+    for node, covers, deps in NODES:
+        args = ["graph", "add", wid, node, "--covers", covers]
+        case.run_cli(*(args + (["--deps", deps] if deps else [])))
+
+
+def complete_nodes(case: ProjectTestCase, wid: str) -> None:
+    for node, _, _ in NODES:
+        case.run_cli("graph", "set", wid, node, "in_progress")
+        case.run_cli("graph", "set", wid, node, "complete")
+
+
+def approve_through(case: ProjectTestCase, wid: str, last: str) -> None:
+    """Write good content and approve every stage up to and including `last`."""
+    for stage in ("intent", "spec", "plan", "execution"):
+        if stage == "plan":
+            add_nodes(case, wid)
+        if stage == "execution":
+            complete_nodes(case, wid)
+        case.write_stage(wid, stage, GOOD[stage])
+        case.run_cli("approve", wid, stage)
+        if stage == last:
+            return

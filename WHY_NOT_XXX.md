@@ -66,7 +66,7 @@ TDD tells the agent *what* the code should do but not *how* to design it. For co
 
 ### 15. Why not just use markdown files without the CLI?
 
-Mostly, you can. The workflow is five markdown files in a folder, and the rules are written down in `spec/PROTOCOL.md`. The CLI adds what plain files can't: approvals with hashes, readiness checks, the execution graph, and the hook that enforces it all.
+Mostly, you can. The workflow is four markdown files in a folder, and the rules are written down in `spec/PROTOCOL.md`. The CLI adds what plain files can't: approvals with hashes, readiness checks, the execution graph, and the hook that enforces it all.
 
 ### 16. Why not use Slack / Discord for agent coordination?
 
@@ -74,7 +74,7 @@ Those are communication tools for humans. Intent-First coordinates locally betwe
 
 ### 17. Why not use a formal software design process (UML, TOGAF, etc.)?
 
-Those are enterprise-grade processes for large teams building large systems. Intent-First is deliberately minimal — five markdown files and a small CLI. It gives you just enough structure to keep an AI agent on track for a single feature, without the overhead of formal methodology.
+Those are enterprise-grade processes for large teams building large systems. Intent-First is deliberately minimal — four markdown files and a small CLI. It gives you just enough structure to keep an AI agent on track for a single feature, without the overhead of formal methodology.
 
 ### 18. Why not just review the git diff at the end?
 

@@ -10,13 +10,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from intent_first import __version__, adapters
+from intent_first import __version__, adapters, trace
 from intent_first.state import (
     DEFAULT_PROJECT_CONFIG,
     DIRNAME,
     STAGES,
     Workflow,
     WorkflowError,
+    check_advice,
     check_stage,
     default_user_name,
     find_root,
@@ -39,8 +40,7 @@ from intent_first.state import (
 
 ICONS = {"approved": "✅", "draft": "📝", "pending": "⬜"}
 NODE_ICONS = {"pending": "⬜", "in_progress": "⏳", "complete": "✅", "failed": "❌", "blocked": "🚫"}
-STAGE_SKILL = {"intent": "intent-first", "spec": "intent-spec", "plan": "intent-plan",
-               "execution": "intent-execute", "artifacts": "intent-artifacts"}
+STAGE_SKILL = {"intent": "intent-first", "spec": "intent-spec", "plan": "intent-plan", "execution": "intent-execute"}
 
 
 def out(msg: str = "") -> None:
@@ -228,14 +228,16 @@ def cmd_status(a: argparse.Namespace) -> int:
     elif cur:
         out(f"Next: ask your agent to run the {STAGE_SKILL[cur]} skill for {wid}")
     else:
-        out("Done.")
+        out(f"Done. Report: {wf.report_path.relative_to(root)} (`intent-first report {wid}`)")
     return 0
 
 
 def cmd_check(a: argparse.Namespace) -> int:
     wf = _load(a.id)
-    stage = resolve_stage(a.stage) if a.stage else (wf.current_stage() or "artifacts")
+    stage = resolve_stage(a.stage) if a.stage else (wf.current_stage() or STAGES[-1])
     issues = check_stage(wf, stage) + wf.integrity_issues()
+    for note in check_advice(wf, stage):
+        out(f"  note: {note}")
     if not issues:
         out(f"✓ {a.id}/{stage}: no issues")
         return 0
@@ -253,15 +255,27 @@ def cmd_approve(a: argparse.Namespace) -> int:
     by = a.by or default_user_name()
     if a.yolo:
         by += " (yolo)"
+    notes = check_advice(wf, stage)
     issues = wf.approve(stage, by, force=a.force)
     out(f"✅ {a.id}/{stage} approved by {by} and locked")
     for i in issues:
         out(f"  ⚠ approved with --force despite: {i}")
+    for note in notes:
+        out(f"  note: {note}")
     nxt = wf.current_stage()
     if nxt:
-        out(f"Next: {STAGE_SKILL[nxt]} {a.id}")
+        out(f"Next: the {STAGE_SKILL[nxt]} skill for {a.id}")
     else:
-        out("Workflow complete.")
+        out(f"Workflow complete. Report: {wf.report_path.relative_to(wf.root)}")
+    return 0
+
+
+def cmd_report(a: argparse.Namespace) -> int:
+    wf = _load(a.id)
+    if a.write:
+        out(str(wf.write_report().relative_to(wf.root)))
+    else:
+        out(trace.build_report(wf).rstrip())
     return 0
 
 
@@ -288,6 +302,8 @@ def cmd_deactivate(_a: argparse.Namespace) -> int:
 # ── graph ─────────────────────────────────────────────────────
 
 def _graph_editable(wf: Workflow) -> None:
+    if not wf.approved("spec"):
+        raise WorkflowError("Graph nodes cover the spec's acceptance criteria; approve the spec first.")
     if wf.approved("plan"):
         raise WorkflowError("The plan is approved; the graph's nodes are fixed. Only `graph set` is allowed.")
 
@@ -298,13 +314,21 @@ def cmd_graph(a: argparse.Namespace) -> int:
     if a.graph_cmd == "add":
         _graph_editable(wf)
         deps = [d.strip() for d in (a.deps or "").split(",") if d.strip()]
-        g.add(a.node, a.name or a.node, deps)
+        covers = [c.strip().upper() for c in a.covers.split(",") if c.strip()]
+        known, _ = trace.criteria(trace.read(wf.stage_file("spec")))
+        unknown = [c for c in covers if c not in known]
+        if not covers or unknown:
+            raise WorkflowError(
+                f"--covers must list acceptance criteria from spec.md (known: {', '.join(known) or 'none'})"
+                + (f"; unknown: {', '.join(unknown)}" if unknown else "")
+            )
+        g.add(a.node, a.name or a.node, deps, covers)
         issues = g.issues()
         if issues:
             g.nodes.pop()
             raise WorkflowError("; ".join(issues))
         wf.save()
-        out(f"Added node {a.node}" + (f" (after {', '.join(deps)})" if deps else ""))
+        out(f"Added node {a.node} covering {', '.join(covers)}" + (f", after {', '.join(deps)}" if deps else ""))
     elif a.graph_cmd == "rm":
         _graph_editable(wf)
         g.remove(a.node)
@@ -344,8 +368,9 @@ def cmd_graph(a: argparse.Namespace) -> int:
         for nid in sorted(order, key=lambda i: (depth.get(i, 0), order.index(i))):
             n = g.get(nid)
             deps = ", ".join(n.get("depends_on", [])) or "—"
+            covers = ", ".join(n.get("covers", [])) or "—"
             out(f"  {'  ' * depth.get(nid, 0)}{NODE_ICONS.get(n.get('status', 'pending'), '?')} "
-                f"{nid}: {n.get('name', '')}  [after: {deps}]")
+                f"{nid}: {n.get('name', '')}  [covers: {covers}; after: {deps}]")
         for issue in g.issues():
             out(f"  ⚠ {issue}")
     return 0
@@ -387,10 +412,9 @@ def cmd_config(a: argparse.Namespace) -> int:
 
 # ── migrate (v2 → v3) ─────────────────────────────────────────
 
-V2_FILES = {"s1_intent.md": "intent", "s2_spec.md": "spec", "s3_plan.md": "plan",
-            "s4_execution.md": "execution", "s5_artifacts.md": "artifacts"}
+V2_FILES = {"s1_intent.md": "intent", "s2_spec.md": "spec", "s3_plan.md": "plan", "s4_execution.md": "execution"}
 V2_DONE = {"intent": {"locked"}, "spec": {"approved", "locked"}, "plan": {"approved", "locked"},
-           "execution": {"complete", "locked"}, "artifacts": {"complete", "locked"}}
+           "execution": {"complete", "locked"}}
 V2_PROMPT_DIRS = (".github/prompts", ".cursor/prompts", ".claude/prompts", ".windsurf/prompts", ".antigravity/prompts")
 V2_AGENT_DIRS = (".github/agents", ".cursor/agents", ".claude/agents", ".windsurf/agents", ".antigravity/agents")
 V2_PROMPTS = ("wf-spec.prompt.md", "wf-plan.prompt.md", "wf-execution.prompt.md", "wf-artifacts.prompt.md", "wf-yolo.prompt.md")
@@ -429,6 +453,8 @@ def _migrate_workflow(root: Path, d: Path) -> str:
             (d / old_name).replace(d / f"{stage}.md")
         elif not (d / f"{stage}.md").exists():
             write_atomic(d / f"{stage}.md", templates()[stage].replace("{{id}}", d.name))
+    if (d / "s5_artifacts.md").is_file():  # v3 has no artifacts stage; keep the old notes
+        (d / "s5_artifacts.md").replace(d / "v2-artifacts.md")
     nodes: list[dict[str, Any]] = []
     gpath = d / "execution-graph.json"
     if gpath.is_file():
@@ -443,7 +469,7 @@ def _migrate_workflow(root: Path, d: Path) -> str:
         "parent": top.get("parent_workflow") or None, "children": children,
         "stages": {s: {"approved_by": None, "approved_at": None, "sha256": None, "forced": False} for s in STAGES},
         "graph": {"nodes": [{
-            "id": n["id"], "name": n.get("name", n["id"]), "depends_on": n.get("depends_on", []),
+            "id": n["id"], "name": n.get("name", n["id"]), "depends_on": n.get("depends_on", []), "covers": [],
             "status": n.get("status", "pending") if n.get("status") in ("pending", "in_progress", "complete", "failed", "blocked") else "pending",
             "started_at": n.get("started_at") or None, "completed_at": n.get("completed_at") or None,
         } for n in nodes if isinstance(n, dict) and "id" in n]},
@@ -466,7 +492,7 @@ def _migrate_workflow(root: Path, d: Path) -> str:
     (d / "status.yml").unlink()
     if gpath.is_file():
         gpath.unlink()
-    return f"{d.name} ({len(approved)}/5 stages approved)"
+    return f"{d.name} ({len(approved)}/{len(STAGES)} stages approved)"
 
 
 def cmd_migrate(_a: argparse.Namespace) -> int:
@@ -567,6 +593,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--by", help="approver name (default: config name, then git user.name)")
     sp.add_argument("--force", action="store_true", help="approve even if `check` reports issues")
     sp.add_argument("--yolo", action="store_true", help="mark as approved on the user's behalf")
+    sp = add("report", cmd_report, "print the goal → criteria → work → results report (written automatically at the end)")
+    sp.add_argument("id")
+    sp.add_argument("--write", action="store_true", help="(re)write report.md in the workflow folder")
     sp = add("reopen", cmd_reopen, "unlock an approved stage and every stage after it (human only)")
     sp.add_argument("id")
     sp.add_argument("stage")
@@ -581,6 +610,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("id")
     g.add_argument("node")
     g.add_argument("--name")
+    g.add_argument("--covers", required=True, help="comma-separated acceptance criteria from spec.md, e.g. AC1,AC3")
     g.add_argument("--deps", help="comma-separated node IDs this node depends on")
     g = gsub.add_parser("rm", help="remove a node (plan stage)")
     g.add_argument("id")

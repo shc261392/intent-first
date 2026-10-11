@@ -9,7 +9,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from helpers import GOOD, SRC, ProjectTestCase
+from helpers import GOOD, SRC, ProjectTestCase, add_nodes
 from intent_first import adapters, guard
 
 WF = ".intent-first/workflows/w"
@@ -34,6 +34,8 @@ class GuardTest(ProjectTestCase):
         self.assertIn("waits for spec approval", self.decide({"tool_name": "MultiEdit", "tool_input": {"file_path": f"{WF}/plan.md"}}))
         self.assertIn("managed by the intent-first CLI", self.decide({"tool_name": "Write", "tool_input": {"file_path": f"{WF}/state.json"}}))
         self.assertIsNone(self.decide({"tool_name": "Read", "tool_input": {"file_path": f"{WF}/intent.md"}}))
+        self.assertIn("generated", self.decide({"tool_name": "Write", "tool_input": {"file_path": f"{WF}/report.md"}}))
+        self.assertIsNone(self.decide({"tool_name": "Write", "tool_input": {"file_path": f"{WF}/artifacts.md"}}))
 
     def test_copilot_camel_case_with_json_string_args(self):
         payload = {"toolName": "edit", "toolArgs": json.dumps({"path": str(self.root / "src/app.py")})}
@@ -66,9 +68,11 @@ class GuardTest(ProjectTestCase):
         self.run_cli("config", "set", "block_code_before_plan", "false")
         self.assertIsNone(self.decide(dict(edit)))
         self.run_cli("config", "set", "block_code_before_plan", "true")
-        for stage in ("spec", "plan"):
-            self.write_stage("w", stage, GOOD[stage])
-            self.run_cli("approve", "w")
+        self.write_stage("w", "spec", GOOD["spec"])
+        self.run_cli("approve", "w")
+        add_nodes(self, "w")
+        self.write_stage("w", "plan", GOOD["plan"])
+        self.run_cli("approve", "w")
         self.assertIsNone(self.decide(dict(edit)))
 
     def test_shell_writes_to_protected_files(self):

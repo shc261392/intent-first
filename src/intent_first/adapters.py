@@ -35,7 +35,7 @@ TOOL_LABELS = {
     "codex": "OpenAI Codex",
     "opencode": "OpenCode",
 }
-SKILLS = ("intent-first", "intent-spec", "intent-plan", "intent-execute", "intent-artifacts", "intent-yolo")
+SKILLS = ("intent-first", "intent-spec", "intent-plan", "intent-execute", "intent-yolo")
 GUARD_MARK = ".intent-first/guard.py"
 MD_BEGIN, MD_END = "<!-- intent-first:begin -->", "<!-- intent-first:end -->"
 GI_BEGIN, GI_END = "# intent-first:begin", "# intent-first:end"

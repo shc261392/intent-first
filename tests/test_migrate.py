@@ -54,13 +54,14 @@ class MigrateTest(ProjectTestCase):
         (self.root / ".intent-first/rules.md").write_text("rules")
 
         out = self.run_cli("migrate")
-        self.assertIn("1 (2/5 stages approved)", out)
+        self.assertIn("1 (2/4 stages approved)", out)
         st = self.state("1")
         self.assertEqual(st["stages"]["spec"]["approved_by"], "Ann")
         self.assertIsNone(st["stages"]["execution"]["approved_at"])  # not contiguous with an approved plan
         self.assertEqual(st["children"], ["child-a"])
         self.assertEqual(st["graph"]["nodes"][0]["status"], "complete")
         self.assertTrue((d / "intent.md").is_file())
+        self.assertEqual((d / "v2-artifacts.md").read_text(), "# artifacts\n")
         self.assertFalse(os.stat(d / "intent.md").st_mode & stat.S_IWUSR)
         self.assertTrue(os.stat(d / "plan.md").st_mode & stat.S_IWUSR)
         self.assertFalse((d / "status.yml").exists())

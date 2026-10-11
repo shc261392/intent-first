@@ -3,60 +3,188 @@
   "$id": "https://github.com/shc261392/intent-first/spec/state.schema.json",
   "title": "Intent-First workflow state",
   "type": "object",
-  "required": ["schema_version", "id", "stages", "graph"],
+  "required": [
+    "schema_version",
+    "id",
+    "stages",
+    "graph"
+  ],
   "properties": {
-    "schema_version": { "const": 3 },
-    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
-    "created_at": { "type": ["string", "null"], "format": "date-time" },
-    "parent": { "type": ["string", "null"] },
-    "children": { "type": "array", "items": { "type": "string" } },
+    "schema_version": {
+      "const": 3
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "parent": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "children": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "stages": {
       "type": "object",
-      "required": ["intent", "spec", "plan", "execution", "artifacts"],
+      "required": [
+        "intent",
+        "spec",
+        "plan",
+        "execution"
+      ],
       "additionalProperties": false,
       "properties": {
-        "intent": { "$ref": "#/$defs/stage" },
-        "spec": { "$ref": "#/$defs/stage" },
-        "plan": { "$ref": "#/$defs/stage" },
-        "execution": { "$ref": "#/$defs/stage" },
-        "artifacts": { "$ref": "#/$defs/stage" }
+        "intent": {
+          "$ref": "#/$defs/stage"
+        },
+        "spec": {
+          "$ref": "#/$defs/stage"
+        },
+        "plan": {
+          "$ref": "#/$defs/stage"
+        },
+        "execution": {
+          "$ref": "#/$defs/stage"
+        }
       }
     },
     "graph": {
       "type": "object",
-      "required": ["nodes"],
-      "properties": { "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } } }
+      "required": [
+        "nodes"
+      ],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      }
     },
     "log": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["at", "event"],
-        "properties": { "at": { "type": "string" }, "event": { "type": "string" } }
+        "required": [
+          "at",
+          "event"
+        ],
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          }
+        }
       }
+    },
+    "git_base": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "HEAD when the plan was approved; the report diffs against it"
     }
   },
   "$defs": {
     "stage": {
       "type": "object",
-      "required": ["approved_by", "approved_at", "sha256"],
+      "required": [
+        "approved_by",
+        "approved_at",
+        "sha256"
+      ],
       "properties": {
-        "approved_by": { "type": ["string", "null"] },
-        "approved_at": { "type": ["string", "null"], "format": "date-time" },
-        "sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
-        "forced": { "type": "boolean" }
+        "approved_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approved_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "forced": {
+          "type": "boolean"
+        }
       }
     },
     "node": {
       "type": "object",
-      "required": ["id", "name", "depends_on", "status"],
+      "required": [
+        "id",
+        "name",
+        "depends_on",
+        "covers",
+        "status"
+      ],
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "depends_on": { "type": "array", "items": { "type": "string" } },
-        "status": { "enum": ["pending", "in_progress", "complete", "failed", "blocked"] },
-        "started_at": { "type": ["string", "null"] },
-        "completed_at": { "type": ["string", "null"] }
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "covers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^AC\\d+$"
+          },
+          "minItems": 1
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "complete",
+            "failed",
+            "blocked"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     }
   }

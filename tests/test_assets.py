@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unittest
 
-from helpers import ProjectTestCase
+from helpers import ProjectTestCase, approve_through
 from intent_first import adapters, cli
 from intent_first.state import REQUIRED_SECTIONS, STAGES, parse_sections
 
@@ -73,7 +73,8 @@ class SchemaTest(ProjectTestCase):
 
         schema = json.loads((Path(__file__).resolve().parent.parent / "spec/state.schema.json").read_text())
         self.run_cli("new", "w")
-        self.run_cli("graph", "add", "w", "n1")
+        approve_through(self, "w", "spec")
+        self.run_cli("graph", "add", "w", "n1", "--covers", "AC1")
         state = self.state("w")
         for key in schema["required"]:
             self.assertIn(key, state)

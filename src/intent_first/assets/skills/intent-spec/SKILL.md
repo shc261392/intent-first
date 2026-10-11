@@ -1,29 +1,33 @@
 ---
 name: intent-spec
-description: Write the spec stage of an Intent-First workflow from its approved intent. Use for /intent-spec <ID>, when asked to draft or revise a workflow's spec, or when a workflow's current stage is spec.
+description: Write the spec of an Intent-First workflow, meaning what will be true and why this design, from its approved intent. Use for /intent-spec <ID>, when asked to draft or revise a workflow's spec, or when a workflow's current stage is spec.
 license: MIT
 ---
 
 # Intent-First: Spec
 
-Input: a workflow ID (ask if missing). Read `.intent-first/workflows/<ID>/intent.md`; write `spec.md` in the same folder. Shared rules are in the `intent-first` skill.
+Input: a workflow ID (ask if it is missing). Read `.intent-first/workflows/<ID>/intent.md`; write `spec.md`. Shared rules are in the `intent-first` skill. The intent must be approved (`intent-first status <ID>`).
 
-First run `intent-first status <ID>`. The intent must be approved; if it is not, finish it with the human first.
+## What a spec is, and is not
+
+The spec says **what will be true and why this design**, seen from outside the code. Its reader is the human deciding whether this is the right thing to build.
+
+- It holds: behaviour users and callers observe, the contracts others depend on, decisions with the alternatives considered, and acceptance criteria that prove each goal.
+- It does not hold: file paths, task order, function bodies or code. Those belong in the plan.
+- Test it twice. Would the spec still hold if the plan were thrown away and redone? Could a reviewer accept or reject the finished work using only the spec?
 
 ## Steps
 
-1. **Understand.** Read `intent.md` fully. Explore the parts of the codebase it touches: conventions, existing code to reuse, constraints. Use a subagent for broad searches if your tool has one.
-2. **Clarify before drafting.** Map every intent item to how it will be met. Ask the human about anything ambiguous now rather than guessing.
-3. **Research.** For each external library or API the design depends on, check the current official docs for the version the project uses. Note what you relied on under `## Research Notes`.
-4. **Draft `spec.md`** using the template's sections:
-   - Overview: each intent item → the design element that satisfies it
-   - Design Decisions: context, options, decision, why (only decisions that matter)
-   - Interfaces: public APIs, signatures, data shapes, as contracts, not code
-   - Constraints: performance, security, compatibility, edge cases
-   - Quality Gates: measurable checks (test commands, benchmarks, acceptance criteria)
-   - Deliverables: one per intent item, with no orphans in either direction
+1. **Understand.** Read the intent. Explore the codebase only enough to know what is feasible, what already exists, and which conventions and constraints apply.
+2. **Clarify first.** For each goal, decide what observable result would prove it. Ask the human about anything ambiguous before drafting.
+3. **Research.** Check the current official docs for any external library or API the design depends on, at the version the project uses.
+4. **Write `spec.md`:**
+   - Summary: the solution in plain sentences
+   - Behaviour: flows, states, errors, edge cases
+   - Interfaces: APIs, CLI flags, config, data formats ("None" if not applicable)
+   - Decisions: context, options, choice, why (only the ones that shape the result)
+   - Acceptance Criteria: `- AC1 (G1): observable, testable statement`. Every goal needs at least one; no criterion without a goal.
    - Open Questions: must be empty to approve
-   Scale the spec to the change; a small feature gets a short spec. No implementation code.
-5. **Review.** Run `intent-first check <ID> spec` and fix every issue. Re-read `intent.md` and confirm everything is covered and nothing extra crept in. If you can start a subagent, have a fresh one review `spec.md` against `intent.md` and report gaps; fix them.
-6. **Ask for approval.** Summarise the key decisions and risks in a few lines. Ask the human to review `spec.md` and approve it or say what to change. Revise until they approve.
-7. **Lock.** On approval, run `intent-first approve <ID> spec`. The next step is `intent-plan <ID>`.
+   Scale it to the change; a small feature gets a short spec.
+5. **Review.** Run `intent-first check <ID> spec`. It verifies that every goal is covered, and notes file-level detail that belongs in the plan. Fix the issues. If you can start a subagent, have a fresh one review `spec.md` against `intent.md` and report gaps.
+6. **Ask for approval** with a few lines on key decisions and risks. Revise until the human approves, then run `intent-first approve <ID> spec`. Next: `intent-plan <ID>`.

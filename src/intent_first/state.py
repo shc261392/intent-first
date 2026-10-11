@@ -17,7 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-STAGES = ("intent", "spec", "plan", "execution", "artifacts")
+from intent_first import trace
+
+STAGES = ("intent", "spec", "plan", "execution")
 SCHEMA_VERSION = 3
 NODE_STATUSES = ("pending", "in_progress", "complete", "failed", "blocked")
 
@@ -43,7 +45,7 @@ def resolve_stage(name: str) -> str:
         return STAGES[int(name) - 1]
     if name in STAGES:
         return name
-    raise WorkflowError(f"Unknown stage '{name}'. Valid: {', '.join(STAGES)} (or 1-5)")
+    raise WorkflowError(f"Unknown stage '{name}'. Valid: {', '.join(STAGES)} (or 1-{len(STAGES)})")
 
 
 def validate_id(wid: str) -> str:
@@ -208,12 +210,12 @@ class Graph:
         known = ", ".join(n["id"] for n in self.nodes) or "(none)"
         raise WorkflowError(f"Unknown node '{node_id}'. Known nodes: {known}")
 
-    def add(self, node_id: str, name: str, deps: list[str]) -> None:
+    def add(self, node_id: str, name: str, deps: list[str], covers: list[str]) -> None:
         validate_id(node_id)
         if any(n["id"] == node_id for n in self.nodes):
             raise WorkflowError(f"Node '{node_id}' already exists")
         self.nodes.append({
-            "id": node_id, "name": name, "depends_on": deps,
+            "id": node_id, "name": name, "depends_on": deps, "covers": covers,
             "status": "pending", "started_at": None, "completed_at": None,
         })
 
@@ -436,11 +438,23 @@ class Workflow:
             "sha256": sha256_file(path), "forced": bool(issues),
         }
         set_readonly(path, True)
+        if stage == "plan":
+            self.data["git_base"] = trace.git_head(self.root)  # the report diffs against this
         self.log("approved", stage=stage, by=by, forced=bool(issues))
         self.save()
-        if stage == "artifacts" and get_active(self.root) == self.id:
-            set_active(self.root, None)
+        if stage == STAGES[-1]:
+            self.write_report()
+            if get_active(self.root) == self.id:
+                set_active(self.root, None)
         return issues
+
+    @property
+    def report_path(self) -> Path:
+        return self.dir / "report.md"
+
+    def write_report(self) -> Path:
+        write_atomic(self.report_path, trace.build_report(self))
+        return self.report_path
 
     def reopen(self, stage: str, by: str) -> list[str]:
         """Reopen a stage and every later one. Returns the stages that were reopened."""
@@ -496,47 +510,21 @@ class Workflow:
 
 # Headings each stage file must contain, and which of them must have content.
 REQUIRED_SECTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
-    "intent": (("Goal",), ("Goal",)),
+    "intent": (("Goals",), ("Goals",)),
     "spec": (
-        ("Overview", "Design Decisions", "Interfaces", "Constraints", "Quality Gates", "Deliverables", "Open Questions"),
-        ("Overview", "Design Decisions", "Quality Gates", "Deliverables"),
+        ("Summary", "Behaviour", "Interfaces", "Decisions", "Acceptance Criteria", "Open Questions"),
+        ("Summary", "Behaviour", "Decisions", "Acceptance Criteria"),
     ),
-    "plan": (("Steps", "Files", "Verification", "Open Questions"), ("Steps", "Files", "Verification")),
-    "execution": (("Progress", "Deviations"), ("Progress",)),
-    "artifacts": (("Summary", "Changes", "Verification", "Follow-ups"), ("Summary", "Changes", "Verification")),
+    "plan": (("Approach", "Steps", "Verification", "Open Questions"), ("Approach", "Steps", "Verification")),
+    "execution": (("Progress", "Deviations", "Results"), ("Progress", "Results")),
 }
 
-_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
-_FENCE_RE = re.compile(r"^(```|~~~).*?^\1", re.S | re.M)
 _NONE_RE = re.compile(r"^(?:[-*]\s*)?(?:none|n/?a|nothing)\.?$", re.I)
 _DEFER_RE = re.compile(r"\b(TODO|TBD|FIXME|XXX)\b")
 _UNCHECKED_RE = re.compile(r"^\s*[-*]\s+\[ \]", re.M)
+APPROVED_DEFER = "[APPROVED-DEFER"
 
-
-def parse_sections(text: str) -> dict[str, str]:
-    """Map lower-cased '## ' headings to their body, with HTML comments removed."""
-    text = _COMMENT_RE.sub("", text)
-    sections: dict[str, str] = {}
-    current: str | None = None
-    buf: list[str] = []
-    for line in text.splitlines():
-        if line.startswith("## "):
-            if current is not None:
-                sections[current] = "\n".join(buf).strip()
-            current, buf = line[3:].strip().lower(), []
-        elif current is not None:
-            buf.append(line)
-    if current is not None:
-        sections[current] = "\n".join(buf).strip()
-    return sections
-
-
-def _find(sections: dict[str, str], name: str) -> str | None:
-    key = name.lower()
-    for heading, body in sections.items():
-        if heading == key or heading.startswith(key):
-            return body
-    return None
+parse_sections = trace.parse_sections
 
 
 def open_questions(body: str) -> list[str]:
@@ -550,36 +538,104 @@ def open_questions(body: str) -> list[str]:
     return out
 
 
+def _sections_issues(name: str, text: str, stage: str) -> list[str]:
+    sections = trace.parse_sections(text)
+    required, nonempty = REQUIRED_SECTIONS[stage]
+    issues: list[str] = []
+    for heading in required:
+        body = trace.find_section(sections, heading)
+        if body is None:
+            issues.append(f"{name}: missing '## {heading}' section")
+        elif heading in nonempty and not body:
+            issues.append(f"{name}: '## {heading}' is empty")
+    for q in open_questions(trace.find_section(sections, "Open Questions") or ""):
+        issues.append(f"{name}: open question: {q[:120]}")
+    if stage != "intent":
+        for line in trace.FENCE_RE.sub("", trace.strip_comments(text)).splitlines():
+            if _DEFER_RE.search(line) and APPROVED_DEFER not in line:
+                issues.append(f"{name}: unresolved marker without [APPROVED-DEFER: <name> <date>]: {line.strip()[:120]}")
+    return issues
+
+
 def check_stage(wf: Workflow, stage: str) -> list[str]:
+    """Issues that block approving a stage."""
     path = wf.stage_file(stage)
     if not path.is_file():
         return [f"{path.name} is missing"]
     text = path.read_text(encoding="utf-8")
-    sections = parse_sections(text)
-    required, nonempty = REQUIRED_SECTIONS[stage]
-    issues: list[str] = []
-    for name in required:
-        body = _find(sections, name)
-        if body is None:
-            issues.append(f"{path.name}: missing '## {name}' section")
-        elif name in nonempty and not body:
-            issues.append(f"{path.name}: '## {name}' is empty")
-    oq = _find(sections, "Open Questions")
-    if oq:
-        for q in open_questions(oq):
-            issues.append(f"{path.name}: open question: {q[:120]}")
-    if stage != "intent":
-        prose = _FENCE_RE.sub("", _COMMENT_RE.sub("", text))
-        for line in prose.splitlines():
-            if _DEFER_RE.search(line) and "[APPROVED-DEFER" not in line:
-                issues.append(f"{path.name}: unresolved marker without [APPROVED-DEFER: <name> <date>]: {line.strip()[:120]}")
+    issues = _sections_issues(path.name, text, stage)
+    goal_map, goal_issues = trace.goals(trace.read(wf.stage_file("intent")))
+
+    if stage == "intent":
+        issues += goal_issues
+        if not goal_map and trace.section(text, "Goals"):
+            issues.append("intent.md: number each goal as `- G1: ...` so the spec can trace to it")
+        return issues
+
+    ac_map, ac_issues = trace.criteria(trace.read(wf.stage_file("spec")))
+    if stage == "spec":
+        issues += ac_issues
+        for aid, (gids, _) in ac_map.items():
+            unknown = [g for g in gids if g not in goal_map]
+            if unknown:
+                issues.append(f"spec.md: {aid} refers to unknown goal(s) {', '.join(unknown)}")
+        for gid in goal_map:
+            if not any(gid in gids for gids, _ in ac_map.values()):
+                issues.append(f"spec.md: goal {gid} has no acceptance criterion")
+        return issues
+
+    nodes = wf.graph.nodes
     if stage == "plan":
         issues += [f"plan: {i}" for i in wf.graph.issues()]
-    if stage == "execution":
-        unchecked = len(_UNCHECKED_RE.findall(_FENCE_RE.sub("", _COMMENT_RE.sub("", text))))
-        if unchecked:
-            issues.append(f"{path.name}: {unchecked} unchecked checklist item(s)")
-        unfinished = [n["id"] for n in wf.graph.nodes if n.get("status") != "complete"]
-        if unfinished:
-            issues.append(f"execution graph: not complete: {', '.join(unfinished)}")
+        if not nodes:
+            issues.append("plan: the execution graph is empty (`intent-first graph add`)")
+        for n in nodes:
+            covers = n.get("covers", [])
+            if not covers:
+                issues.append(f"plan: node '{n['id']}' covers no acceptance criterion")
+            unknown = [a for a in covers if a not in ac_map]
+            if unknown:
+                issues.append(f"plan: node '{n['id']}' covers unknown criteria {', '.join(unknown)}")
+        for aid in ac_map:
+            if not any(aid in n.get("covers", []) for n in nodes):
+                issues.append(f"plan: {aid} is not covered by any graph node")
+        verified = set(trace.AC_REF_RE.findall(trace.section(text, "Verification")))
+        for aid in ac_map:
+            if aid not in verified:
+                issues.append(f"plan.md: '## Verification' does not say how {aid} is proven")
+        steps = trace.step_ids(text)
+        for n in nodes:
+            if n["id"] not in steps:
+                issues.append(f"plan.md: no `### {n['id']}` subsection under '## Steps'")
+        for sid in steps:
+            if sid not in {n["id"] for n in nodes}:
+                issues.append(f"plan.md: step '### {sid}' has no graph node")
+        return issues
+
+    # execution
+    body = trace.FENCE_RE.sub("", trace.strip_comments(text))
+    unchecked = len(_UNCHECKED_RE.findall(body))
+    if unchecked:
+        issues.append(f"{path.name}: {unchecked} unchecked checklist item(s)")
+    unfinished = [n["id"] for n in nodes if n.get("status") != "complete"]
+    if unfinished:
+        issues.append(f"execution graph: not complete: {', '.join(unfinished)}")
+    res = trace.results(text)
+    for aid in ac_map:
+        status, line = res.get(aid, (None, ""))
+        if status is None:
+            issues.append(f"execution.md: no result for {aid} under '## Results' (`- {aid}: pass — evidence`)")
+        elif status == "fail" and APPROVED_DEFER not in line:
+            issues.append(f"execution.md: {aid} failed: {line[:120]}")
     return issues
+
+
+def check_advice(wf: Workflow, stage: str) -> list[str]:
+    """Non-blocking notes about stage roles."""
+    if stage != "spec":
+        return []
+    paths = trace.source_paths_outside_interfaces(trace.read(wf.stage_file("spec")))
+    if not paths:
+        return []
+    return [f"spec.md mentions source files ({', '.join(paths[:5])}). The spec says what and why; "
+            "file-level detail belongs in the plan."]

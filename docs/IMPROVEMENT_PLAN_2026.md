@@ -15,7 +15,7 @@ Maintainer 決策：**License 改 MIT**、**接受破壞性變更**、**一級�
 | P0.4 版本釘選 + SHA-256 + attestation | ✅ | `install.sh`、`.github/workflows/release.yml` |
 | P0.5 文件誠實化、移除寫死模型 | ✅ | `README.md`、`WHY_NOT_XXX.md` |
 | P1.1 `PROTOCOL.md` + `state.schema.json` + `migrate` | ✅ | `spec/`、`intent-first migrate` |
-| P1.2 Agent Skills 改寫（常駐 ≈90 字、全部 skill ≈1.9k 字，原 ≈7.5k 字） | ✅ | `assets/skills/` |
+| P1.2 Agent Skills 改寫（常駐 ≈110 字、全部 skill ≈1.9k 字，原 ≈7.5k 字） | ✅ | `assets/skills/` |
 | P1.3 由單一來源產生各工具格式 | ✅（改為 `init` 時產生，不需 build 步驟） | `adapters.py` |
 | P1.4 Hook 強制 | ✅ 五個工具皆有 | `guard.py` |
 | P1.5 Plugin / marketplace 包裝 | ⏳ 後續 | — |
@@ -24,6 +24,14 @@ Maintainer 決策：**License 改 MIT**、**接受破壞性變更**、**一級�
 | P2.1 真實模型行為 eval | ⏳ 後續 | — |
 | P2.2 阻擋事件 audit log | ✅ | `.intent-first/audit.log` |
 | P3 MCP server、export | ⏳ 後續 | — |
+
+### Stage 設計修訂（v3.0.0 發佈前）
+
+| 原設計 | 問題 | 新設計 |
+|---|---|---|
+| Artifacts 是第 5 個 stage | 交付紀錄很重要，但讓 agent 另寫一份文件、再審一次，成本高，內容也會偏離實際 | 刪除該 stage。執行核准時由 CLI 從追溯鏈**產生** `report.md`（目標 → 驗收條件 → 工作 → 結果、偏差、後續工作、diff stat），不耗 token、不會失真 |
+| Intent mapping 是 spec 裡的一個 phase | 對應關係寫在文字裡，無法檢查 | 改成**貫穿各階段的 ID 追溯鏈**：`G1` → `AC1 (G1)` → node `--covers AC1` + Verification → `AC1: pass — 證據`。每個 gate 由 `check` 驗證鏈結完整 |
+| Spec 與 plan 都寫「設計」，界線模糊 | 兩份文件重複，agent 在 plan 做新決策 | **Spec = 外部視角的 what/why**（行為、介面、決策、驗收條件），讀者是決定「該不該做」的人。**Plan = 內部視角的 how/順序**（檔案、步驟、測試、驗證），讀者是執行的 agent，不得新增行為或決策。`check` 會提示 spec 中的檔案路徑，並要求 plan 每個 node 都服務某個驗收條件、步驟與 node 一一對應 |
 
 已知限制：
 - Codex 的 project hook 需在 `/hooks` 信任一次；社群回報部分版本對 `apply_patch` 的 deny 未生效（openai/codex#27833），此時仍有檔案唯讀與 hash 檢查作為後援。
