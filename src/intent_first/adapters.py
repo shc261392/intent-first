@@ -58,7 +58,10 @@ CODEX_MATCHER = "apply_patch|Bash|shell|exec_command|Edit|Write"
 
 
 def asset(rel: str) -> str:
-    return resources.files("intent_first").joinpath("assets", *rel.split("/")).read_text(encoding="utf-8")
+    node = resources.files("intent_first").joinpath("assets")
+    for part in rel.split("/"):
+        node = node.joinpath(part)  # one part at a time: zipfile.Path.joinpath takes one argument on Python 3.9
+    return node.read_text(encoding="utf-8")
 
 
 def detect_tools(root: Path) -> list[str]:

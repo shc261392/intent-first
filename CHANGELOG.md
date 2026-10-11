@@ -7,7 +7,7 @@ A rewrite for agents that support Agent Skills and hooks. It is **breaking**: wo
 ### Added
 
 - First-class support for **GitHub Copilot, Claude Code, Cursor, OpenAI Codex and OpenCode**, each in its native format: Agent Skills (`SKILL.md`), `AGENTS.md`, and that tool's hooks or plugin.
-- **Guard hook** (`.intent-first/guard.py`). It blocks edits to approved stages, writes that skip a stage, code changes before the plan is approved, and agent use of human-only commands.
+- **Guard hook** (`.intent-first/guard.py`). It blocks edits to approved stages, writes that skip a stage, deleting workflow folders, code changes before the plan is approved, and agent use of human-only commands. Shell commands are parsed for their write targets, so reads are never blocked.
 - `intent-first check`: deterministic readiness checks (required sections, open questions, unapproved `TODO`s, unchecked tasks, graph state), plus SHA-256 integrity of approved stages.
 - `approve`, `reopen`, `activate`/`deactivate`, `doctor`, `uninstall`, and `migrate` (v2 → v3).
 - `config set strict_approval true`, so that only the human can approve.

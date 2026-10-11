@@ -95,8 +95,10 @@ On every agent tool call that writes or runs a shell command, the guard blocks:
 
 1. Writes to an approved stage file, to `state.json` or `report.md`, or to `.intent-first/{guard.py,config.json,manifest.json,active}`.
 2. Writes to a stage file whose previous stage is not approved.
-3. Writes outside `.intent-first/` while an active workflow's plan is unapproved, if `block_code_before_plan` is true.
-4. The shell commands `intent-first reopen|deactivate|uninstall|config set`, and `approve` too when `strict_approval` is true.
-5. Shell commands that both write (redirection, `rm`, `mv`, `sed -i`, ...) and mention a protected path from rules 1–2.
+3. Deleting, moving or overwriting `.intent-first/`, `.intent-first/workflows/` or a workflow folder.
+4. Writes outside `.intent-first/` while an active workflow's plan is unapproved, if `block_code_before_plan` is true.
+5. The shell commands `intent-first reopen|activate|deactivate|uninstall|config set`, and `approve` too when `strict_approval` is true.
+
+Rules 1–4 apply to file tools and to shell commands alike. For shell commands the guard parses out the paths written: redirection targets, and the operands of `rm`, `mv`, `cp`, `tee`, `touch`, `truncate`, `chmod`, `sed -i`, `perl -i`, `dd of=` and the PowerShell equivalents. Globs count as writes to their fixed prefix, and here-document bodies are ignored. For inline scripts (`python -c`, `node -e`, ...) and commands it can't parse, it falls back to blocking any mention of a protected file. Reads are never blocked.
 
 It blocks by writing a reason to stderr and exiting with status 2. Errors inside the guard itself never block. It is a seatbelt against drift, not a security boundary: a human or a determined agent can always edit the files directly. `check` reports any such edits through the hashes.

@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,12 +36,20 @@ SHELL_HINTS = ("bash", "shell", "powershell", "terminal", "exec", "command")
 PATCH_PATH_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+?)\s*$|^\*\*\* Move to: (.+?)\s*$", re.M)
 # The CLI in command position: `intent-first`, a path to it, its .pyz, or `python -m intent_first`.
 _CLI = r"(?:^|[\s;&|(/])intent[-_]first(?:\.pyz)?\s+"
-HUMAN_ONLY_RE = re.compile(_CLI + r"(reopen|deactivate|uninstall|config\s+set)\b")
+HUMAN_ONLY_RE = re.compile(_CLI + r"(reopen|activate|deactivate|uninstall|config\s+set)\b")
 APPROVE_RE = re.compile(_CLI + r"approve\b")
-SHELL_WRITE_RE = re.compile(
-    r"(?<![0-9&])>>?|\btee\b|\bsed\s+-[a-zA-Z]*i|\bperl\s+-[a-zA-Z]*i|\brm\b|\bmv\b|\bchmod\b|\btruncate\b"
-    r"|\bdd\b|\bpython[0-9.]*\s+-c\b|\bnode\s+-e\b|Set-Content|Out-File|Remove-Item|Move-Item"
-)
+# Which arguments of a shell command it writes to: every operand, the last one, or all but the first.
+WRITE_COMMANDS = {
+    "rm": "all", "rmdir": "all", "mv": "all", "tee": "all", "touch": "all", "truncate": "all", "unlink": "all",
+    "shred": "all", "cp": "last", "install": "last", "ln": "last", "rsync": "last", "chmod": "rest", "chown": "rest",
+    "remove-item": "all", "move-item": "all", "set-content": "all", "add-content": "all", "out-file": "all",
+    "new-item": "all", "clear-content": "all", "copy-item": "last",
+}
+COMMAND_PREFIXES = {"sudo", "env", "command", "exec", "nice", "nohup", "time"}
+REDIRECTS = {">", ">>", ">|", "&>", "&>>"}
+SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "|&"}
+INTERPRETER_RE = re.compile(r"\b(?:python[0-9.]*|node|ruby|perl|php)\s+-[a-zA-Z]*[ceE]\b")
+HEREDOC_RE = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)")
 PROTECTED_IN_SHELL_RE = re.compile(
     r"\.intent-first[/\\](?:workflows[/\\]([A-Za-z0-9._-]+)[/\\]([A-Za-z_]+\.(?:md|json))|(guard\.py|config\.json|manifest\.json|active)\b)"
 )
@@ -169,6 +178,8 @@ def check_write(project: Project, target: Path) -> str | None:
             return _stage_rule(project.state(parts[2]), parts[2], parts[3])
         if len(parts) == 2 and parts[1] in OWNED_FILES:
             return f".intent-first/{parts[1]} is managed by the intent-first CLI; ask the human to change it."
+        if len(parts) <= 3 and parts[1:2] in ((), ("workflows",)):
+            return "Workflow folders are kept or removed by the human (`intent-first uninstall --purge`); don't delete or move them."
         return None
     wid = project.active()
     if not wid or not project.config().get("block_code_before_plan", True):
@@ -182,19 +193,106 @@ def check_write(project: Project, target: Path) -> str | None:
     return None
 
 
-def check_shell(project: Project, cmd: str) -> str | None:
+def _strip_heredocs(cmd: str) -> str:
+    """Drop here-document bodies so their text isn't parsed as commands."""
+    out: list[str] = []
+    end: str | None = None
+    for line in cmd.splitlines():
+        if end is not None:
+            if line.strip() == end:
+                end = None
+            continue
+        out.append(line)
+        m = HEREDOC_RE.search(line)
+        if m:
+            end = m.group(1)
+    return "\n".join(out)
+
+
+def _operands(cmd: str, args: list[str]) -> list[str]:
+    """The arguments a write command modifies."""
+    if cmd == "dd":
+        return [a[3:] for a in args if a.startswith("of=")]
+    if cmd in ("sed", "perl"):
+        if not any(a.startswith("-") and not a.startswith("--") and "i" in a or a.startswith("--in-place") for a in args):
+            return []
+        operands, script_given, skip = [], False, False
+        for a in args:
+            if skip:
+                skip = False
+            elif a in ("-e", "-E", "-f", "--expression", "--file"):
+                script_given, skip = True, True
+            elif not a.startswith("-"):
+                operands.append(a)
+        return operands if script_given else operands[1:]
+    mode = WRITE_COMMANDS.get(cmd)
+    operands = [a for a in args if not a.startswith("-")]
+    if mode == "last":
+        return operands[-1:] if len(operands) > 1 else []
+    if mode == "rest":
+        return operands[1:]
+    return operands if mode == "all" else []
+
+
+def shell_write_targets(cmd: str) -> list[str] | None:
+    """Paths a shell command writes, removes or moves; None if it can't be parsed."""
+    try:
+        lexer = shlex.shlex(_strip_heredocs(cmd), posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    targets: list[str] = []
+    segment: list[str] = []
+    for i, tok in enumerate(tokens + [";"]):
+        if tok in REDIRECTS:
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("&"):
+                targets.append(tokens[i + 1])
+            if segment and segment[-1].isdigit():
+                segment.pop()  # the fd in `2>file`
+            continue
+        if i > 0 and tokens[i - 1] in REDIRECTS | {"<", "<<", "<<<", ">&", "<&"}:
+            continue  # the redirection's own target
+        if tok in SEPARATORS:
+            words = segment
+            while words and (words[0].lower() in COMMAND_PREFIXES or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0])):
+                words = words[1:]  # `sudo`, `env`, `VAR=value` before the command
+            if words:
+                name = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+                targets += _operands(name, words[1:])
+            segment = []
+        elif tok not in ("<", "<<", "<<<", ">&", "<&"):
+            segment.append(tok)
+    return [t for t in targets if t not in ("/dev/null", "-", "/dev/stdout", "/dev/stderr")]
+
+
+def _glob_base(path: str) -> str:
+    """For `dir/*.py` check `dir`: a glob writes somewhere inside its fixed prefix."""
+    cut = min((path.find(c) for c in "*?[" if c in path), default=-1)
+    return path if cut < 0 else (path[:cut].rsplit("/", 1)[0] if "/" in path[:cut] else ".")
+
+
+def check_shell(project: Project, cmd: str, base: Path) -> str | None:
     m = HUMAN_ONLY_RE.search(cmd)
     if m:
         return f"`intent-first {m.group(1)}` is reserved for the human. Ask them to run it."
     if APPROVE_RE.search(cmd) and project.config().get("strict_approval"):
         return "strict_approval is on: only the human runs `intent-first approve`."
-    if ".intent-first" in cmd and SHELL_WRITE_RE.search(cmd):
+    targets = shell_write_targets(cmd)
+    if targets is None or INTERPRETER_RE.search(cmd):
+        # Can't see what an inline script or an unparsable command writes: protect the files it names.
         for wid, fname, owned in PROTECTED_IN_SHELL_RE.findall(cmd):
             if owned:
                 return f".intent-first/{owned} is managed by the intent-first CLI; ask the human to change it."
             reason = _stage_rule(project.state(wid), wid, fname)
             if reason:
                 return reason
+        targets = targets or []
+    for t in targets:
+        p = Path(os.path.expanduser(_glob_base(t)))
+        reason = check_write(project, p if p.is_absolute() else base / p)
+        if reason:
+            return reason
     return None
 
 
@@ -211,7 +309,7 @@ def decide(data: dict[str, Any], root: Path) -> str | None:
     if not targets:
         cmd = shell_command(args)
         if cmd and (not name or any(h in name for h in SHELL_HINTS)):
-            return check_shell(project, cmd)
+            return check_shell(project, cmd, base)
         if any(h in name for h in WRITE_HINTS):
             targets = _paths(args)
     for t in targets:

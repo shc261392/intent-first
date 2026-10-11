@@ -172,10 +172,11 @@ def cmd_new(a: argparse.Namespace) -> int:
         parent.data.setdefault("children", []).append(wid)
         parent.log("spawned", child=wid)
         parent.save()
-    if not a.no_activate:
+    # A follow-up doesn't take over: its parent may still be executing.
+    if not a.no_activate and not a.parent:
         set_active(root, wid)
     out(f"Created workflow {wid} → {wf.dir.relative_to(root)}/")
-    out(f"Next: write {wf.stage_file('intent').relative_to(root)} (Goal is required), "
+    out(f"Next: write numbered goals in {wf.stage_file('intent').relative_to(root)} (`- G1: ...`), "
         f"then `intent-first approve {wid} intent`.")
     return 0
 
@@ -577,7 +578,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("new", cmd_new, "create a workflow (auto-numbered if no ID) and make it active")
     sp.add_argument("id", nargs="?")
-    sp.add_argument("--parent", help="link as a follow-up of this workflow")
+    sp.add_argument("--parent", help="link as a follow-up of this workflow (doesn't change the active workflow)")
     sp.add_argument("--no-activate", action="store_true")
     sp = add("list", cmd_list, "list workflows")
     sp.add_argument("--json", action="store_true")

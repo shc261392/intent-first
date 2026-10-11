@@ -227,6 +227,54 @@ class GraphTest(ProjectTestCase):
         self.assertIn("unchecked", self.run_cli("check", "w", expect=1))
 
 
+class ReviewRegressionTest(ProjectTestCase):
+    """Cases found in code review."""
+
+    def setUp(self):
+        super().setUp()
+        self.run_cli("new", "w")
+
+    def test_uppercase_node_ids_match_steps(self):
+        approve_through(self, "w", "spec")
+        self.run_cli("graph", "add", "w", "API", "--covers", "AC1,AC2")
+        plan = GOOD["plan"].replace("### api — callback route", "### API — callback route")
+        self.write_stage("w", "plan", plan.replace("### ui\nAdd the button.\n\n", ""))
+        self.run_cli("approve", "w")
+
+    def test_force_approve_of_missing_file_is_a_clean_error(self):
+        self.wf_path("w", "intent.md").unlink()
+        self.assertIn("intent.md is missing", self.run_cli("approve", "w", "--force", expect=1))
+
+    def test_duplicate_deps_are_not_a_cycle(self):
+        approve_through(self, "w", "spec")
+        self.run_cli("graph", "add", "w", "a", "--covers", "AC1")
+        self.run_cli("graph", "add", "w", "b", "--covers", "AC2", "--deps", "a,a")
+        self.assertEqual(json.loads(self.run_cli("graph", "show", "w", "--json"))[1]["depends_on"], ["a"])
+
+    def test_complete_requires_dependencies(self):
+        approve_through(self, "w", "plan")
+        self.assertIn("waiting on: api", self.run_cli("graph", "set", "w", "ui", "complete", expect=1))
+
+    def test_approval_refuses_tampered_earlier_stage(self):
+        approve_through(self, "w", "intent")
+        self.write_stage("w", "intent", GOOD["intent"] + "- G3: sneaky\n")
+        self.write_stage("w", "spec", GOOD["spec"])
+        self.assertIn("intent.md changed after approval", self.run_cli("approve", "w", "spec", expect=1))
+
+    def test_follow_up_does_not_take_over_active(self):
+        self.run_cli("new", "child", "--parent", "w")
+        self.assertEqual((self.root / ".intent-first/active").read_text().strip(), "w")
+
+    def test_rewritten_files_keep_their_mode(self):
+        target = self.root / "AGENTS.md"
+        target.write_text("# mine\n")
+        os.chmod(target, 0o644)
+        self.run_cli("init", "--tools", "claude")
+        self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o644)
+        if os.name != "nt":
+            self.assertTrue(os.stat(self.root / "CLAUDE.md").st_mode & stat.S_IRGRP)
+
+
 class ConfigTest(ProjectTestCase):
     def test_name_and_project_flags(self):
         os.environ.pop("INTENT_FIRST_USER")

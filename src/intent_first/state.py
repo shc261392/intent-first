@@ -58,12 +58,21 @@ def validate_id(wid: str) -> str:
 
 # ── Files ─────────────────────────────────────────────────────
 
+def _default_mode() -> int:
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
 def write_atomic(path: Path, text: str) -> None:
+    """Replace a file atomically, keeping its permissions (new files get the usual umask-based mode)."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else _default_mode()
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -215,7 +224,7 @@ class Graph:
         if any(n["id"] == node_id for n in self.nodes):
             raise WorkflowError(f"Node '{node_id}' already exists")
         self.nodes.append({
-            "id": node_id, "name": name, "depends_on": deps, "covers": covers,
+            "id": node_id, "name": name, "depends_on": list(dict.fromkeys(deps)), "covers": list(dict.fromkeys(covers)),
             "status": "pending", "started_at": None, "completed_at": None,
         })
 
@@ -230,10 +239,11 @@ class Graph:
         if status not in NODE_STATUSES or status == "blocked":
             raise WorkflowError(f"Invalid status '{status}'. Valid: pending, in_progress, complete, failed")
         node = self.get(node_id)
-        if status == "in_progress":
+        if status in ("in_progress", "complete"):
             unmet = [d for d in node.get("depends_on", []) if self._status(d) != "complete"]
             if unmet:
                 raise WorkflowError(f"Node '{node_id}' is waiting on: {', '.join(unmet)}")
+        if status == "in_progress":
             node["started_at"] = now()
         elif status == "complete":
             node["completed_at"] = now()
@@ -294,7 +304,7 @@ class Graph:
 
     def topological_order(self) -> list[str] | None:
         ids = {n["id"] for n in self.nodes}
-        indeg = {n["id"]: len([d for d in n.get("depends_on", []) if d in ids]) for n in self.nodes}
+        indeg = {n["id"]: len({d for d in n.get("depends_on", []) if d in ids}) for n in self.nodes}
         queue = [nid for nid, d in indeg.items() if d == 0]
         order: list[str] = []
         while queue:
@@ -426,7 +436,11 @@ class Workflow:
         if status == "pending":
             prev = STAGES[STAGES.index(stage) - 1]
             raise WorkflowError(f"Approve {prev} before {stage}")
-        issues = check_stage(self, stage)
+        path = self.stage_file(stage)
+        if not path.is_file():
+            raise WorkflowError(f"{path.name} is missing; restore it before approving")
+        earlier = [i for i in self.integrity_issues() if i.split(".md", 1)[0] in STAGES[:STAGES.index(stage)]]
+        issues = earlier + check_stage(self, stage)
         if issues and not force:
             raise WorkflowError(
                 f"{stage} is not ready:\n" + "\n".join(f"  - {i}" for i in issues)

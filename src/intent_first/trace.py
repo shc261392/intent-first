@@ -121,10 +121,13 @@ def results(execution_text: str) -> dict[str, tuple[str, str]]:
 def step_ids(plan_text: str) -> list[str]:
     """First word of each `###` heading inside the plan's Steps section."""
     out = []
-    for heading in parse_sections(section(plan_text, "Steps"), level=3):
-        word = heading.split()[0].strip("`*:") if heading.split() else ""
-        if word:
-            out.append(word)
+    in_fence = False
+    for line in section(plan_text, "Steps").splitlines():
+        if line.startswith(("```", "~~~")):
+            in_fence = not in_fence
+        words = line[4:].split() if line.startswith("### ") and not in_fence else []
+        if words and words[0].strip("`*:"):
+            out.append(words[0].strip("`*:"))  # case kept: node IDs are case-sensitive
     return out
 
 

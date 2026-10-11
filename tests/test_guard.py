@@ -89,6 +89,31 @@ class GuardTest(ProjectTestCase):
         for cmd in ('grep -n "intent-first reopen" README.md', "intent-first config get name", "intent-first status w"):
             self.assertIsNone(self.decide({"tool_name": "Bash", "tool_input": {"command": cmd}}), cmd)
 
+    def bash(self, cmd: str) -> str | None:
+        return self.decide({"tool_name": "Bash", "tool_input": {"command": cmd}})
+
+    def test_shell_cannot_switch_or_delete_workflows(self):
+        self.assertIn("reserved", self.bash("intent-first activate other"))
+        for cmd in ("rm -rf .intent-first/workflows/w", "mv .intent-first/workflows/w /tmp/", "rm -rf .intent-first",
+                    f"rm {WF}/*", "Remove-Item -Recurse .intent-first/workflows"):
+            self.assertIn("Workflow folders", self.bash(cmd) or "", cmd)
+
+    def test_shell_writes_to_project_files_before_plan(self):
+        for cmd in ("cat > src/app.py <<EOF\nprint(1)\nEOF", "echo x >> README.md", "sed -i 's/a/b/' src/app.py",
+                    "rm src/*.py", "dd if=/dev/zero of=data.bin", "FOO=1 sudo tee src/x.py < in", "cp /tmp/a src/a.py"):
+            self.assertIn("plan is approved", self.bash(cmd) or "", cmd)
+        for cmd in ("echo x > /tmp/scratch", "ls 2>/dev/null", "pytest -q 2>&1 | tee /tmp/log", "cp src/a.py /tmp/",
+                    "cat <<EOF > /tmp/x\n> .intent-first/workflows/w/intent.md\nEOF", "git diff > /tmp/d.patch"):
+            self.assertIsNone(self.bash(cmd), cmd)
+
+    def test_shell_reads_of_approved_files_are_allowed(self):
+        self.run_cli("deactivate")
+        for cmd in (f'grep -n "->" {WF}/intent.md', f"jq '.x > 1' {WF}/state.json", f"cat {WF}/intent.md | wc -l"):
+            self.assertIsNone(self.bash(cmd), cmd)
+        self.assertIn("approved and locked", self.bash(f"sed -i.bak 's/a/b/' {WF}/intent.md") or "")
+        self.assertIn("approved and locked", self.bash(f"python3 -c \"open('{WF}/intent.md','w')\"") or "")
+        self.assertIn("approved and locked", self.bash(f"echo 'unterminated > {WF}/intent.md") or "")
+
     def test_strict_approval(self):
         cmd = {"tool_name": "Bash", "tool_input": {"command": "intent-first approve w spec"}}
         self.assertIsNone(self.decide(dict(cmd)))

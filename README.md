@@ -110,10 +110,13 @@ intent-first uninstall [--purge]
 
 The guard is the hook every agent runs before a tool call. It blocks the call and tells the agent why when it would:
 
-- edit an approved stage file, `state.json`, or a file the CLI owns;
+- edit an approved stage file, `state.json`, `report.md`, or a file the CLI owns;
 - write `plan.md` before the spec is approved (and likewise for every stage);
+- delete or move a workflow folder;
 - change project files while the active workflow's plan is unapproved;
-- run `intent-first reopen`, `deactivate`, `uninstall` or `config set` (and `approve` under `strict_approval`).
+- run `intent-first reopen`, `activate`, `deactivate`, `uninstall` or `config set` (and `approve` under `strict_approval`).
+
+This applies to file-edit tools and to shell commands. The guard parses out what a command writes (`>`, `tee`, `rm`, `mv`, `sed -i`, …), so reads like `grep` or `cat` are never blocked.
 
 It is a **seatbelt, not a sandbox**. It catches drift and scope creep; it doesn't defend against an agent that is determined to get around it. Errors in the guard itself never block your agent. The full rules are in [`spec/PROTOCOL.md`](spec/PROTOCOL.md).
 
