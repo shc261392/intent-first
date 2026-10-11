@@ -31,29 +31,29 @@ class InitTest(ProjectTestCase):
                     self.assertFalse((self.root / rel).exists(), f"{rel} should not exist for {tool}")
                 for rel in files:
                     if rel.endswith(".json"):
-                        data = json.loads((self.root / rel).read_text())
+                        data = json.loads((self.root / rel).read_text(encoding="utf-8"))
                         self.assertIn(adapters.GUARD_MARK, json.dumps(data))
 
     def test_hook_config_shapes(self):
         self.run_cli("init", "--tools", "all")
-        claude = json.loads((self.root / ".claude/settings.json").read_text())
+        claude = json.loads((self.root / ".claude/settings.json").read_text(encoding="utf-8"))
         self.assertEqual(claude["hooks"]["PreToolUse"][0]["matcher"], adapters.CLAUDE_MATCHER)
-        copilot = json.loads((self.root / ".github/hooks/intent-first.json").read_text())
+        copilot = json.loads((self.root / ".github/hooks/intent-first.json").read_text(encoding="utf-8"))
         self.assertEqual(copilot["version"], 1)
         self.assertIn("bash", copilot["hooks"]["PreToolUse"][0])
-        cursor = json.loads((self.root / ".cursor/hooks.json").read_text())
+        cursor = json.loads((self.root / ".cursor/hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(cursor["version"], 1)
         self.assertEqual(set(cursor["hooks"]), {"preToolUse", "beforeShellExecution"})
-        codex = json.loads((self.root / ".codex/hooks.json").read_text())
+        codex = json.loads((self.root / ".codex/hooks.json").read_text(encoding="utf-8"))
         self.assertIn("apply_patch", codex["hooks"]["PreToolUse"][0]["matcher"])
 
     def test_reinit_is_idempotent_and_drops_deselected_tools(self):
         self.run_cli("init", "--tools", "claude,cursor")
         self.run_cli("init", "--tools", "claude,cursor")
-        settings = json.loads((self.root / ".claude/settings.json").read_text())
+        settings = json.loads((self.root / ".claude/settings.json").read_text(encoding="utf-8"))
         self.assertEqual(len(settings["hooks"]["PreToolUse"]), 1)
-        self.assertEqual((self.root / "AGENTS.md").read_text().count(adapters.MD_BEGIN), 1)
-        self.assertEqual((self.root / ".gitignore").read_text().count(adapters.GI_BEGIN), 1)
+        self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8").count(adapters.MD_BEGIN), 1)
+        self.assertEqual((self.root / ".gitignore").read_text(encoding="utf-8").count(adapters.GI_BEGIN), 1)
         self.run_cli("init", "--tools", "claude")
         self.assertFalse((self.root / ".cursor").exists())
         self.run_cli("init")  # reuses the manifest's tool list
@@ -74,13 +74,13 @@ class InitTest(ProjectTestCase):
         target.write_text('{"mine": true}\n')
         out = self.run_cli("init", "--tools", "copilot")
         self.assertIn("not created by intent-first", out)
-        self.assertEqual(target.read_text(), '{"mine": true}\n')
+        self.assertEqual(target.read_text(encoding="utf-8"), '{"mine": true}\n')
 
     def test_invalid_json_is_left_alone(self):
         (self.root / ".cursor").mkdir()
         (self.root / ".cursor/hooks.json").write_text("{ // jsonc\n}")
         self.assertIn("not plain JSON", self.run_cli("init", "--tools", "cursor"))
-        self.assertEqual((self.root / ".cursor/hooks.json").read_text(), "{ // jsonc\n}")
+        self.assertEqual((self.root / ".cursor/hooks.json").read_text(encoding="utf-8"), "{ // jsonc\n}")
 
 
 class UninstallTest(ProjectTestCase):
@@ -94,9 +94,9 @@ class UninstallTest(ProjectTestCase):
         self.run_cli("init", "--tools", "all")
         self.run_cli("new", "w")
         self.run_cli("uninstall", "--yes")
-        self.assertEqual((self.root / "CLAUDE.md").read_text(), "# My project\nKeep me.\n")
-        self.assertEqual((self.root / ".gitignore").read_text(), "node_modules/\n")
-        self.assertEqual(json.loads((self.root / ".claude/settings.json").read_text()), user_settings)
+        self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "# My project\nKeep me.\n")
+        self.assertEqual((self.root / ".gitignore").read_text(encoding="utf-8"), "node_modules/\n")
+        self.assertEqual(json.loads((self.root / ".claude/settings.json").read_text(encoding="utf-8")), user_settings)
         for rel in ("AGENTS.md", ".agents", ".github", ".cursor", ".codex", ".opencode", ".claude/skills",
                     ".intent-first/guard.py", ".intent-first/manifest.json"):
             self.assertFalse((self.root / rel).exists(), rel)

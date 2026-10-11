@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import unittest
 
 from helpers import GOOD, ProjectTestCase, add_nodes, approve_through, complete_nodes
@@ -16,9 +17,9 @@ class LifecycleTest(ProjectTestCase):
         self.run_cli("new")
         self.assertTrue(self.wf_path("2", "intent.md").is_file())
         self.assertFalse(self.wf_path("2", "artifacts.md").exists())
-        self.assertEqual((self.root / ".intent-first/active").read_text().strip(), "2")
+        self.assertEqual((self.root / ".intent-first/active").read_text(encoding="utf-8").strip(), "2")
         self.run_cli("new", "named", "--no-activate")
-        self.assertEqual((self.root / ".intent-first/active").read_text().strip(), "2")
+        self.assertEqual((self.root / ".intent-first/active").read_text(encoding="utf-8").strip(), "2")
 
     def test_new_rejects_bad_and_duplicate_ids(self):
         self.run_cli("new", "../escape", expect=1)
@@ -33,7 +34,7 @@ class LifecycleTest(ProjectTestCase):
             self.assertEqual(st["stages"][s]["approved_by"], "Tester")
             self.assertFalse(os.stat(self.wf_path("auth", f"{s}.md")).st_mode & stat.S_IWUSR)
         self.assertFalse((self.root / ".intent-first/active").exists())
-        report = self.wf_path("auth", "report.md").read_text()
+        report = self.wf_path("auth", "report.md").read_text(encoding="utf-8")
         self.assertIn("# GitHub login", report)
         self.assertIn("| **G1** Users can log in with GitHub. | AC1 ✅ | met |", report)
         self.assertIn("| **G2** Password login keeps working. | AC2 ✅ | met |", report)
@@ -44,7 +45,9 @@ class LifecycleTest(ProjectTestCase):
 
     def test_report_includes_diff_since_plan_approval(self):
         (self.root / "app.py").write_text("a = 1\n")
-        os.system(f"cd '{self.root}' && git add app.py && git -c user.name=t -c user.email=t@t commit -qm init")
+        subprocess.run(["git", "add", "app.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                        "commit", "-qm", "init"], cwd=self.root, check=True)
         self.run_cli("new", "w")
         approve_through(self, "w", "plan")
         self.assertTrue(self.state("w")["git_base"])
@@ -178,7 +181,7 @@ class TraceabilityTest(ProjectTestCase):
         self.assertIn("AC2 failed", self.run_cli("check", "w", expect=1))
         self.write_stage("w", "execution", failing.replace("(5 passed)", "(5 passed) [APPROVED-DEFER: Ann 2026-10-12]"))
         self.run_cli("approve", "w")
-        self.assertIn("AC2 ❌", self.wf_path("w", "report.md").read_text())
+        self.assertIn("AC2 ❌", self.wf_path("w", "report.md").read_text(encoding="utf-8"))
 
 
 class GraphTest(ProjectTestCase):
@@ -263,16 +266,17 @@ class ReviewRegressionTest(ProjectTestCase):
 
     def test_follow_up_does_not_take_over_active(self):
         self.run_cli("new", "child", "--parent", "w")
-        self.assertEqual((self.root / ".intent-first/active").read_text().strip(), "w")
+        self.assertEqual((self.root / ".intent-first/active").read_text(encoding="utf-8").strip(), "w")
 
     def test_rewritten_files_keep_their_mode(self):
         target = self.root / "AGENTS.md"
         target.write_text("# mine\n")
         os.chmod(target, 0o644)
         self.run_cli("init", "--tools", "claude")
+        if os.name == "nt":
+            self.skipTest("Windows has no POSIX permission bits")
         self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o644)
-        if os.name != "nt":
-            self.assertTrue(os.stat(self.root / "CLAUDE.md").st_mode & stat.S_IRGRP)
+        self.assertTrue(os.stat(self.root / "CLAUDE.md").st_mode & stat.S_IRGRP)
 
 
 class ConfigTest(ProjectTestCase):

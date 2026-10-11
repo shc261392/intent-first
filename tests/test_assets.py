@@ -71,7 +71,7 @@ class SchemaTest(ProjectTestCase):
         import json
         from pathlib import Path
 
-        schema = json.loads((Path(__file__).resolve().parent.parent / "spec/state.schema.json").read_text())
+        schema = json.loads((Path(__file__).resolve().parent.parent / "spec/state.schema.json").read_text(encoding="utf-8"))
         self.run_cli("new", "w")
         approve_through(self, "w", "spec")
         self.run_cli("graph", "add", "w", "n1", "--covers", "AC1")

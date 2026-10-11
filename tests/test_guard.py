@@ -142,7 +142,7 @@ class GuardTest(ProjectTestCase):
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("approved and locked", r.stderr)
         self.assertEqual(json.loads(r.stdout)["permissionDecision"], "deny")
-        audit = (self.root / ".intent-first/audit.log").read_text().splitlines()
+        audit = (self.root / ".intent-first/audit.log").read_text(encoding="utf-8").splitlines()
         self.assertEqual(json.loads(audit[-1])["event"], "blocked")
         r = self.run_hook(json.dumps({"tool_name": "Read", "tool_input": {"file_path": "x"}}), self.root)
         self.assertEqual((r.returncode, r.stdout), (0, ""))
@@ -171,7 +171,8 @@ class GuardTest(ProjectTestCase):
         self.assertEqual(r.stdout.strip(), "blocked,ok", r.stderr)
 
     def test_installed_guard_matches_package(self):
-        self.assertEqual((self.root / ".intent-first/guard.py").read_text(), (SRC / "intent_first/guard.py").read_text())
+        installed = (self.root / ".intent-first/guard.py").read_text(encoding="utf-8")
+        self.assertEqual(installed, (SRC / "intent_first/guard.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
