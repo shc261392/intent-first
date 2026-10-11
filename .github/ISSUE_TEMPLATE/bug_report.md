@@ -26,9 +26,10 @@ What actually happens.
 ## Environment
 
 - OS: [e.g., macOS 14, Ubuntu 22.04]
-- Shell: [e.g., bash 5.2, zsh 5.9]
-- AI Tool: [e.g., GitHub Copilot, Cursor, Claude Code]
-- Intent-First version: [commit hash or install date]
+- Python: [e.g., 3.12]
+- Agent: [GitHub Copilot / Claude Code / Cursor / Codex / OpenCode, with version]
+- Intent-First version: [`intent-first --version`]
+- `intent-first doctor` output:
 
 ## Additional Context
 

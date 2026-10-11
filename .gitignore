@@ -12,7 +12,13 @@ Thumbs.db
 workflow/
 
 # Intent-First workflow (ephemeral)
-.intent-first/
-workflow/
+.intent-first/workflows/
+.intent-first/active
+.intent-first/audit.log
 
 __pycache__/
+
+# Build output
+dist/
+build/
+*.egg-info/
