@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - name: Check tag matches version
+        run: |
+          version=$(python3 -c "import sys; sys.path.insert(0, 'src'); import intent_first; print(intent_first.__version__)")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME != v$version"; exit 1; }
+      - name: Test
+        run: python3 -m unittest discover -s tests
+      - name: Build
+        run: |
+          python3 scripts/build_pyz.py
+          uv build
+          cd dist && sha256sum intent-first.pyz ./*.whl ./*.tar.gz | sed 's| \./| |' > SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/intent-first.pyz
+            dist/*.whl
+            dist/*.tar.gz
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
