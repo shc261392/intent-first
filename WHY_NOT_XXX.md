@@ -1,6 +1,6 @@
 # Why Not XXX?
 
-Intent-First is a **superlightweight local agent enforcement protocol**. It's markdown files and a bash script. It runs locally, has zero dependencies, and works with any AI coding tool that reads markdown.
+Intent-First is a **superlightweight local agent enforcement protocol**. It's markdown files, a small dependency-free Python CLI, and a hook. It runs locally and plugs into Copilot, Claude Code, Cursor, Codex and OpenCode through their native skills and hooks.
 
 It is **not** a team collaboration tool, a project management platform, or an alternative to any workflow that involves multiple humans coordinating together. It enforces structure for a **single developer working with AI agents** on their local machine.
 
@@ -34,7 +34,7 @@ Those are knowledge management tools for teams. Intent-First workflow files are 
 
 ### 7. Why not just write better prompts?
 
-Better prompts help. But a single prompt can't enforce a multi-stage process with approval gates and filesystem-level locking. Intent-First is the structure that makes your prompts work within a controlled workflow instead of a freeform conversation.
+Better prompts help. But a single prompt can't enforce a multi-stage process with approval gates; Intent-First's hooks block out-of-order and post-approval edits at the tool level. Intent-First is the structure that makes your prompts work within a controlled workflow instead of a freeform conversation.
 
 ### 8. Why not use GitHub Projects / Kanban boards?
 
@@ -54,7 +54,7 @@ Current AI IDEs give you autocomplete, chat, and command execution. None of them
 
 ### 12. Why not just trust the AI agent?
 
-Because trust without verification is how you get subtle bugs in production. The 70% confidence threshold (based on a structured scoring model) exists because agents are confidently wrong more often than you'd expect — research shows LLMs overestimate confidence by 10–30%. Intent-First doesn't distrust the agent — it gives the agent a structure where it can be *verifiably* right at each stage.
+Because trust without verification is how you get subtle bugs in production. Agents are confidently wrong more often than you'd expect, and their self-reported confidence is poorly calibrated. So instead of trusting a confidence score, Intent-First makes uncertainty explicit: anything unresolved goes under `## Open Questions`, and a stage with open questions can't be approved. Intent-First doesn't distrust the agent — it gives the agent a structure where it can be *verifiably* right at each stage.
 
 ### 13. Why not use Makefiles / task runners for workflow automation?
 
@@ -66,7 +66,7 @@ TDD tells the agent *what* the code should do but not *how* to design it. For co
 
 ### 15. Why not just use markdown files without the CLI?
 
-You can! The CLI is optional convenience. It creates directories, copies templates, and manages file permissions for locking. If you'd rather do that manually, the workflow is just five markdown files in a folder. The protocol is the markdown; the CLI is a shortcut.
+Mostly, you can. The workflow is five markdown files in a folder, and the rules are written down in `spec/PROTOCOL.md`. The CLI adds what plain files can't: approvals with hashes, readiness checks, the execution graph, and the hook that enforces it all.
 
 ### 16. Why not use Slack / Discord for agent coordination?
 
@@ -74,7 +74,7 @@ Those are communication tools for humans. Intent-First coordinates locally betwe
 
 ### 17. Why not use a formal software design process (UML, TOGAF, etc.)?
 
-Those are enterprise-grade processes for large teams building large systems. Intent-First is deliberately minimal — five markdown files and a bash script. It gives you just enough structure to keep an AI agent on track for a single feature, without the overhead of formal methodology.
+Those are enterprise-grade processes for large teams building large systems. Intent-First is deliberately minimal — five markdown files and a small CLI. It gives you just enough structure to keep an AI agent on track for a single feature, without the overhead of formal methodology.
 
 ### 18. Why not just review the git diff at the end?
 
@@ -82,7 +82,7 @@ By then the damage is done. If the agent made a wrong architectural decision in 
 
 ### 19. Why not use MCP servers or custom tool integrations?
 
-MCP is a transport layer — it gives agents access to external tools. Intent-First is a workflow protocol that could theoretically *use* MCP for locking, but it doesn't need to. `chmod` works everywhere, on every OS, with every agent. No server, no configuration, no dependencies.
+MCP is a transport layer — it gives agents access to external tools. Intent-First is a workflow protocol; it enforces itself through each agent's native hooks plus file permissions and hashes. No server, no configuration, no dependencies. An MCP front-end could be added later without changing the protocol.
 
 ### 20. Why not build a VS Code extension / IDE plugin instead?
 

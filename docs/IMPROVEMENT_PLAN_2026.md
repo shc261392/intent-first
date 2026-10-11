@@ -3,6 +3,35 @@
 > 目標：讓 Intent-First 成為**真正實用的 lightweight、pluggable 協定**。
 > 意思是：30 秒裝上、對每個主流 agent 都用「原生」的方式載入、強制力來自 harness 而非提示詞、拔掉時不留痕跡。
 
+## 決策與執行狀態（v3.0.0）
+
+Maintainer 決策：**License 改 MIT**、**接受破壞性變更**、**一級支援 Copilot / Claude Code / Cursor / Codex / OpenCode 五個工具**。
+
+| 項目 | 狀態 | 實作位置 |
+|---|---|---|
+| P0.1 CI 跑單元測試（Linux/macOS/Windows × Py3.9/3.13）、刪除 `__pycache__` | ✅ | `.github/workflows/ci.yml`、`tests/` |
+| P0.2 各工具安裝路徑修正 | ✅ | `src/intent_first/adapters.py` |
+| P0.3 `AGENTS.md` 支援 | ✅ | `assets/agents-block.md` |
+| P0.4 版本釘選 + SHA-256 + attestation | ✅ | `install.sh`、`.github/workflows/release.yml` |
+| P0.5 文件誠實化、移除寫死模型 | ✅ | `README.md`、`WHY_NOT_XXX.md` |
+| P1.1 `PROTOCOL.md` + `state.schema.json` + `migrate` | ✅ | `spec/`、`intent-first migrate` |
+| P1.2 Agent Skills 改寫（常駐 ≈90 字、全部 skill ≈1.9k 字，原 ≈7.5k 字） | ✅ | `assets/skills/` |
+| P1.3 由單一來源產生各工具格式 | ✅（改為 `init` 時產生，不需 build 步驟） | `adapters.py` |
+| P1.4 Hook 強制 | ✅ 五個工具皆有 | `guard.py` |
+| P1.5 Plugin / marketplace 包裝 | ⏳ 後續 | — |
+| P1.6 `approve` + Open Questions gate、移除 confidence 打分 | ✅ | `state.py`、`intent-first check` |
+| P1.7 套件化（wheel/sdist/zipapp，`uvx` 可用） | ✅；PyPI 發佈待 maintainer 設定 trusted publishing | `pyproject.toml`、`scripts/build_pyz.py` |
+| P2.1 真實模型行為 eval | ⏳ 後續 | — |
+| P2.2 阻擋事件 audit log | ✅ | `.intent-first/audit.log` |
+| P3 MCP server、export | ⏳ 後續 | — |
+
+已知限制：
+- Codex 的 project hook 需在 `/hooks` 信任一次；社群回報部分版本對 `apply_patch` 的 deny 未生效（openai/codex#27833），此時仍有檔案唯讀與 hash 檢查作為後援。
+- Shell 指令的寫入偵測是啟發式（重導向、`rm`、`mv`、`sed -i` 等），無法涵蓋所有寫法；`intent-first check` 的 hash 比對會抓到漏網的修改。
+- 同時選 Claude 與其他工具時，`.claude/skills/` 與 `.agents/skills/` 內容相同；Copilot/Cursor/OpenCode 兩處都讀，以同名 skill 呈現。
+
+---
+
 ---
 
 ## 0. TL;DR
@@ -163,11 +192,11 @@ intent-first/
 
 ---
 
-## 6. 需要 maintainer 決定的事項
-1. **License**：維持 GPL-3.0 或改 MIT / Apache-2.0（影響企業採用）。
-2. **v3 是否接受破壞性變更**（`status.yml` → `state.json`、`/wf-*` → skills 名稱）。建議接受，並提供 `migrate` 與一個版本的相容層。
-3. **主要支援工具**：建議從「Copilot only」擴大為 Copilot + Claude Code + Codex（`AGENTS.md`）三個一級支援，其餘由生成的 adapter 提供社群支援。
-4. **Stage 數量**：是否在 P2 eval 後允許「精簡模式」。
+## 6. Maintainer 決策（已定案）
+1. **License**：改為 MIT。✅
+2. **破壞性變更**：接受。提供 `intent-first migrate`（v2 → v3）。✅
+3. **一級支援工具**：Copilot、Claude Code、Cursor、Codex、OpenCode。✅
+4. **Stage 數量**：待 P2 eval 後再決定是否提供精簡模式。
 
 ---
 

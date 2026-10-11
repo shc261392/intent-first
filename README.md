@@ -4,217 +4,150 @@
 
 ![intent-first](https://github.com/user-attachments/assets/1dc5ab56-b597-4cb2-a349-b6c4c19cfa03)
 
-**A lightweight local protocol that stops AI agents from guessing.**
+**Stop your coding agent from guessing.**
 
-Markdown files + a tiny CLI. Zero dependencies.
+A lightweight, pluggable protocol: **Intent → Spec → Plan → Execution → Artifacts**, approved by you between stages and enforced by your agent's own hooks.
 
-> **Primary support:** VSCode GitHub Copilot extension and GitHub Copilot CLI. Other AI coding tools are community-supported but not actively tested.
+Works with **GitHub Copilot · Claude Code · Cursor · OpenAI Codex · OpenCode**
 
-**Intent → Spec → Plan → Execute → Artifacts**
-
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![CI](https://github.com/shc261392/intent-first/actions/workflows/ci.yml/badge.svg)](https://github.com/shc261392/intent-first/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
 ---
 
-## What Is This?
+## What it is
 
-Intent-First is a local agent enforcement protocol. It gives your AI coding agent a 5-stage process: you write the intent, the agent designs, plans, builds, and documents — with your approval between each stage.
+You write the intent. The agent designs, plans, builds and documents it, and each stage waits for your approval. The point is to make the agent ask about intent first instead of discovering wrong assumptions 500 lines into a diff.
 
-It's not a framework, not a SaaS product, not a team collaboration tool. It's just markdown files and a bash script that keep your agent on track.
-
-**The core insight:** the bottleneck isn't code generation — it's intent capture. If the agent knows exactly what you want, and you've signed off on the design and plan, execution becomes the easy part.
-
-### Why This, Why Now
-
-The best thing about Intent-First is that you can **drop it into any project in 30 seconds** and remove it just as fast if something better comes along. AI evolves at a pace where no tool is guaranteed to be useful by year-end. Intent-First doesn't fight that — it embraces it. It's a lightweight, easy-to-iterate protocol that you adopt today and replace tomorrow if the landscape shifts.
-
-In this era of agentic coding, nothing beats **fast iteration and ease of adoption**. No config files to maintain, no vendor lock-in, no migration path to worry about. It's markdown and bash. If it stops being useful, run `intent-first implode` and it's gone.
-
-```mermaid
-flowchart LR
-    I["💡 Intent\n(You write goals)"]
-    S["📐 Spec\n(Agent designs)"]
-    P["📋 Plan\n(Agent details)"]
-    E["⚙️ Execute\n(Agent builds)"]
-    A["📦 Artifacts\n(Agent documents)"]
-
-    I -->|"approve"| S
-    S -->|"approve"| P
-    P -->|"approve"| E
-    E -->|"tests pass"| A
-
-    style I fill:#fef3c7,stroke:#d97706,color:#000
-    style S fill:#dbeafe,stroke:#2563eb,color:#000
-    style P fill:#dbeafe,stroke:#2563eb,color:#000
-    style E fill:#dcfce7,stroke:#16a34a,color:#000
-    style A fill:#f3e8ff,stroke:#9333ea,color:#000
-```
+- **Pluggable.** It installs in each agent's native format: [Agent Skills](https://github.com/agentskills/agentskills), `AGENTS.md`, and that agent's hooks. `intent-first uninstall` removes exactly what was added and leaves your own config intact.
+- **Lightweight.** The CLI is a single 35 KB Python file with no dependencies. It adds under 100 words of always-on context; stage instructions load only when they are used.
+- **Enforced, not just requested.** A pre-tool-use hook blocks edits to approved stages, writing a stage out of order, and code changes before the plan is approved. Approved files are hashed, so later tampering shows up in `intent-first check`.
+- **Checkable.** A stage can't be approved with empty required sections, open questions, unchecked tasks, unfinished graph nodes or unapproved `TODO`s.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shc261392/intent-first/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shc261392/intent-first/main/install.sh | sh
 ```
 
-This auto-detects your AI tools (Copilot, Cursor, Claude Code, Windsurf, Aider, Cline, Antigravity) and installs the CLI and templates globally to `~/.intent-first/`. Then run `intent-first init` in each project to set up local rules and gitignore.
+This downloads `intent-first.pyz` from the latest GitHub release and verifies it against `SHA256SUMS`. Releases also carry [build provenance attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations) (`gh attestation verify intent-first.pyz -R shc261392/intent-first`). Pin a version with `INTENT_FIRST_VERSION=v3.0.0`.
 
-Workflow data (`.intent-first/workflows/`) is **ephemeral and gitignored** — like chat history, it structures your process but isn't version-controlled. Commit specific outcomes explicitly when you want to keep them.
-
-<details>
-<summary><b>Manual install</b></summary>
-
-1. Copy `rules/RULES.md` content into your AI tool's instruction file (or use the one-liner: `For the Intent-First Agentic Workflow, see \`.intent-first/rules.md\`.`)
-2. Copy `rules/RULES.md` to `.intent-first/rules.md` in your project
-3. Copy `prompts/wf-*.prompt.md` into your tool's prompts directory
-4. Copy `templates/` to `~/.intent-first/templates/`
-5. Copy `cli/intent-first` to `~/.intent-first/bin/intent-first`
-
-</details>
-
-<details>
-<summary><b>Tool-specific locations</b></summary>
-
-| Tool | Rules | Prompts |
-|------|-------|---------|
-| **GitHub Copilot** | `.github/copilot-instructions.md` | `.github/prompts/` |
-| **Cursor** | `.cursor/rules/intent-first.md` | `.cursor/prompts/` |
-| **Claude Code** | `CLAUDE.md` | `.claude/prompts/` |
-| **Windsurf** | `.windsurfrules` | `.windsurf/prompts/` |
-| **Aider** | `.aider.rules.md` | — |
-| **Cline / Roo** | `.clinerules` | — |
-| **Antigravity** | `.antigravity/rules/intent-first.md` | `.antigravity/prompts/` |
-
-</details>
-
-## Quick Start
-
-### 1. Create a workflow
+You can also use [uv](https://docs.astral.sh/uv/) or pipx:
 
 ```bash
-intent-first new            # → .intent-first/workflows/1/
-intent-first new add-auth   # → .intent-first/workflows/add-auth/
+uv tool install git+https://github.com/shc261392/intent-first@v3.0.0
+uvx --from git+https://github.com/shc261392/intent-first@v3.0.0 intent-first init   # no install at all
 ```
 
-No name? Auto-numbered. Got a name? Use it. The command stays short either way.
+Requires Python 3.9+.
 
-### 2. Write your intent
-
-Edit `.intent-first/workflows/1/s1_intent.md`. Write **what** you want and **why** — not how to build it.
-
-### 3. Walk through the stages
-
-Tell your agent:
-
-```
-/wf-spec 1          # Agent drafts spec from your intent → you approve
-/wf-plan 1          # Agent creates implementation plan → you approve
-/wf-execution 1     # Agent builds it, tracking progress in real-time
-/wf-artifacts 1     # Agent documents outcomes and lessons learned
-```
-
-Each stage produces a markdown file. Each requires your approval before the next begins.
-
-## Stage Locking
-
-When you approve a stage, the agent **automatically locks it** by running `intent-first lock <ID> <stage>` via terminal. This makes the file read-only at the OS level — `chmod`. No IDE plugin, no git hook, no agent can silently edit a locked stage.
+## Set up a project
 
 ```bash
-# Automatic — agents run this after you approve:
-intent-first lock 1 spec        # s2_spec.md → read-only
-
-# Manual override if needed:
-intent-first unlock 1 spec      # revert to writable
+cd your-project
+intent-first init                      # detects your agents; or:
+intent-first init --tools claude,codex # any of: copilot, claude, cursor, codex, opencode, all
 ```
 
-The `validate` command catches drift — it warns when a file says "Approved — Locked" but is still writable.
+Commit the files it creates. Workflow data under `.intent-first/workflows/` is git-ignored by default.
 
-## The Rules
+| Installed | Read by |
+|---|---|
+| `AGENTS.md` (marked block) | Copilot, Cursor, Codex, OpenCode |
+| `.agents/skills/intent-*/SKILL.md` | Copilot, Cursor, Codex, OpenCode |
+| `CLAUDE.md` block, `.claude/skills/`, hook in `.claude/settings.json` | Claude Code (Copilot CLI also reads this hook) |
+| `.github/hooks/intent-first.json` | Copilot CLI, cloud agent, VS Code |
+| `.cursor/hooks.json` (`preToolUse`, `beforeShellExecution`) | Cursor |
+| `.codex/hooks.json` | Codex (trust it once via `/hooks`) |
+| `.opencode/plugins/intent-first.js`, `.opencode/commands/` | OpenCode |
+| `.intent-first/guard.py`, `config.json`, `manifest.json` | all hooks |
 
-Installed automatically into your AI tool's config:
+Re-run `intent-first init` to update or to change tools. `intent-first doctor` checks the installation.
 
-| Rule | Effect |
-|------|--------|
-| **No auto-proceed** | Agent waits for your approval between stages |
-| **Stage locking** | Approved stages become read-only (OS-enforced) |
-| **70% confidence threshold** | Agent asks you when it's unsure |
-| **Decision tracking** | Who decided, when, and why |
-| **100% plan compliance** | Deviations need your explicit approval |
-| **No reversal** | Locked stages are immutable — start a new workflow instead |
-| **No defer / no unfinished** | No task may be deferred or delivered incomplete without explicit named approval |
-
-## YOLO Mode
-
-YOLO mode is for when you want the benefit of a structured flow — spec, plan, execute, artifacts — but want to skip all manual review for high-confidence work. The agent still thinks through every stage; it just doesn't wait for your approval unless it's unsure.
-
-```
-/wf-yolo 1
-/wf-yolo add-auth Add OAuth2 login with GitHub provider
-```
-
-The agent runs all stages in one pass, **auto-approving when confidence is ≥85%** and pausing when it drops below. Every auto-decision is tagged `[YOLO-AUTO]` and logged in artifacts.
-
-## CLI Reference
+## Use it
 
 ```bash
-intent-first new [name]            # Create workflow (auto-number or named)
-intent-first lock <ID> <STAGE>     # Lock stage file (chmod read-only)
-intent-first unlock <ID> <STAGE>   # Unlock stage file
-intent-first validate [ID]         # Check workflow integrity
-intent-first list                  # Show all workflows with status
-intent-first status [--workflow ID] # Detailed workflow status display
-intent-first configure --name "N"  # Set your preferred display name
-intent-first graph show <ID>       # Show execution graph for a workflow
-intent-first spawn <PID> <NAME>    # Create a child workflow linked to parent
-intent-first implode               # Remove all intent-first files
-intent-first help                  # Show help
+intent-first new add-auth      # creates .intent-first/workflows/add-auth/ and makes it active
 ```
 
-Stages: `intent`, `spec`, `plan`, `execution`, `artifacts` (or `1`–`5`).
+Write the **Goal** in `intent.md`, or ask your agent to help draft it. Then work stage by stage:
 
-## When to Use This
+| You say | The agent | Then |
+|---|---|---|
+| "approve the intent" | runs `intent-first approve add-auth intent` | |
+| `/intent-spec add-auth` | explores, researches, writes `spec.md`, asks what's unclear | you review → approve |
+| `/intent-plan add-auth` | writes `plan.md` and an execution graph of work nodes | you review → approve; code edits unlock |
+| `/intent-execute add-auth` | implements node by node, logs progress, asks before deviating | you review → approve |
+| `/intent-artifacts add-auth` | documents what shipped, verification, follow-ups | you approve; workflow closes |
 
-**Use it** for features touching 3+ files, architectural changes, anything where "just do it" leads to rework.
+How you invoke a skill depends on the agent: `/intent-spec` in Claude Code, Copilot, Cursor and OpenCode, `$intent-spec` in Codex. Or just ask: "continue the intent-first workflow".
 
-**Skip it** for one-line fixes, config changes, quick docs edits. Just talk to your agent normally.
+Want speed? `/intent-yolo add-auth <intent>` runs every stage in one pass. The agent approves on your behalf only while there are no open questions, and tags its assumptions `[YOLO-ASSUMPTION]`.
 
-## Model Guidance
+```bash
+intent-first status [ID]            # where a workflow stands (--json for agents)
+intent-first list                   # all workflows
+intent-first check ID [stage]       # what blocks approval; detects edits after approval
+intent-first approve ID [stage]     # approve and lock (records your name)
+intent-first reopen ID stage        # human only: unlock a stage and every stage after it
+intent-first new name --parent ID   # follow-up workflow
+intent-first deactivate             # human only: allow unrelated code edits
+intent-first graph add|rm|set|show|ready ID ...
+intent-first config set name "Ann Lee"
+intent-first config set block_code_before_plan false
+intent-first config set strict_approval true   # only the human may run `approve`
+intent-first uninstall [--purge]
+```
+
+## What the guard enforces
+
+The guard is the hook every agent runs before a tool call. It blocks the call and tells the agent why when it would:
+
+- edit an approved stage file, `state.json`, or a file the CLI owns;
+- write `plan.md` before the spec is approved (and likewise for every stage);
+- change project files while the active workflow's plan is unapproved;
+- run `intent-first reopen`, `deactivate`, `uninstall` or `config set` (and `approve` under `strict_approval`).
+
+It is a **seatbelt, not a sandbox**. It catches drift and scope creep; it doesn't defend against an agent that is determined to get around it. Errors in the guard itself never block your agent. The full rules are in [`spec/PROTOCOL.md`](spec/PROTOCOL.md).
+
+## When to use it
+
+**Use it** for features that touch several files, architectural changes, anything where "just do it" leads to rework. **Skip it** for one-line fixes and changes you can fully describe in a sentence. Run `intent-first deactivate` (or don't create a workflow) and talk to your agent normally.
 
 | Stage | Reasoning depth | Model tier |
-|-------|----------------|------------|
-| Spec / Plan | Deep — architecture, trade-offs, precise signatures | Strongest available |
-| Execution | Moderate — follows a locked plan | Mid-tier |
-| Artifacts | Light — structured documentation | Lightweight |
+|---|---|---|
+| Spec, Plan | Deep: architecture, trade-offs | Strongest available |
+| Execution | Moderate: follows a locked plan | Mid-tier |
+| Artifacts | Light: structured documentation | Lightweight |
+
+## Upgrading from v2
+
+v3 is a breaking release. Run `intent-first migrate`, then `intent-first init`. See [CHANGELOG.md](CHANGELOG.md).
 
 ## FAQ
 
 <details>
-<summary><b>Does this work with my AI tool?</b></summary>
-Intent-First is primarily tested with <b>VSCode GitHub Copilot extension</b> and <b>GitHub Copilot CLI</b>. The installer also covers Cursor, Claude Code, Windsurf, Aider, Cline, and Antigravity as community-supported but not actively tested. For other tools, copy <code>rules/RULES.md</code> into your tool's config.
-</details>
-
-<details>
 <summary><b>Can I skip stages?</b></summary>
-No. That's the point. Use <code>/wf-yolo</code> if you want speed — it still runs all stages but auto-approves at high confidence.
+No, that's the point. Use <code>/intent-yolo</code> for speed: it still runs every stage but approves for you while nothing is uncertain.
 </details>
 
 <details>
-<summary><b>What if I need to change the spec after planning?</b></summary>
-Create a new workflow. The old one stays for reference. This prevents scope creep.
+<summary><b>The spec turned out wrong after planning. Now what?</b></summary>
+Run <code>intent-first reopen ID spec</code> yourself. That unlocks the spec and every later stage. For a big change of direction, start a new workflow with <code>--parent</code> instead.
 </details>
 
 <details>
-<summary><b>Why is workflow data gitignored?</b></summary>
-Workflow files are ephemeral process artifacts. Commit specific outcomes explicitly when you want to preserve them.
+<summary><b>Why is workflow data git-ignored?</b></summary>
+It is process, like chat history. The artifacts stage hands you a summary for the commit message or PR. Remove the <code>.gitignore</code> lines if your team wants workflows in git.
 </details>
 
 <details>
-<summary><b>How does auto-locking work?</b></summary>
-The stage prompts instruct agents to run <code>intent-first lock &lt;ID&gt; &lt;stage&gt;</code> via terminal after approval. This sets the file read-only via <code>chmod</code>. The OS enforces it — no plugin or hook needed. <code>unlock</code> is there if you need it.
+<summary><b>Do I need the CLI for the agent to follow the workflow?</b></summary>
+The skills call it for state changes (approve, graph, check). The file layout and rules in <a href="spec/PROTOCOL.md">spec/PROTOCOL.md</a> are tool-neutral, so another implementation can use the same files.
 </details>
 
-<details>
-<summary><b>Is this a security layer? Can the agent bypass locking?</b></summary>
-No, this is <strong>not</strong> zero-trust security. The agent can run <code>intent-first unlock</code> — nothing technically stops it. Intent-First assumes agents are capable of getting the job done most of the time. The purpose of stage locking is to add a <strong>structural guardrail</strong> that helps agents work as intended and prevents scope creep (which happens very easily in agentic coding). Think of it as a seatbelt, not a prison wall — it's there to pull the AI back when it misfires, not to defend against a hostile agent.
-</details>
+## License
+
+[MIT](LICENSE)
